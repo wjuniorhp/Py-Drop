@@ -1,0 +1,1471 @@
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, 
+    QScrollArea, QFrame, QApplication, QStackedWidget, QSlider, QRadioButton, QCheckBox
+)
+from PyQt6.QtCore import Qt, QPoint, QPropertyAnimation, QEasingCurve, QTimer, pyqtSignal, QMimeData, QUrl, QByteArray, QRect, QRectF
+from PyQt6.QtGui import QIcon, QFont, QCursor, QColor, QPainter, QDrag, QDesktopServices, QKeyEvent, QPainterPath
+from PyQt6.QtSvg import QSvgRenderer
+from src.utils import helpers as utils
+import os
+import re
+
+def create_svg(inner_html, color, size=18):
+    return f"""<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{inner_html}</svg>"""
+
+class SvgButton(QPushButton):
+    def __init__(self, inner_html, size=18, color="#666666", hover_color="#ffffff", size_fixed=24):
+        super().__init__()
+        self.inner_html = inner_html
+        self.size_svg = size
+        self.color = color
+        self.hover_color = hover_color
+        self.is_hovered = False
+        self._is_active = False
+        self.active_color = "#4CAF50"
+        
+        self.setFixedSize(size_fixed, size_fixed)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setStyleSheet("background: transparent; border: none;")
+
+    def set_active(self, active):
+        self._is_active = active
+        self.update()
+
+    def enterEvent(self, event):
+        self.is_hovered = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self.is_hovered = False
+        self.update()
+        super().leaveEvent(event)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if self._is_active:
+            current_color = self.active_color
+        else:
+            current_color = self.hover_color if self.is_hovered else self.color
+        svg = create_svg(self.inner_html, current_color, self.size_svg)
+        renderer = QSvgRenderer(QByteArray(svg.encode('utf-8')))
+        renderer.render(painter)
+
+class SvgLabel(QWidget):
+    def __init__(self, inner_html, size=18, color="#aaaaaa"):
+        super().__init__()
+        self.inner_html = inner_html
+        self.size_svg = size
+        self.color = color
+        self.setFixedSize(size, size)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        svg = create_svg(self.inner_html, self.color, self.size_svg)
+        renderer = QSvgRenderer(QByteArray(svg.encode('utf-8')))
+        renderer.render(painter)
+
+class StackedIconsWidget(QWidget):
+    def __init__(self, pixmaps, size=32, show_plus=False):
+        super().__init__()
+        self.pixmaps = pixmaps
+        self.icon_size = size
+        self.show_plus = show_plus
+        # calculate width based on overlaps
+        extra_h = 16 if show_plus else 0
+        self.setFixedSize(size + (len(pixmaps)-1)*15 + 10, size + 10 + extra_h)
+
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        inner_size = self.icon_size - 8
+        spacing = 6
+        
+        for i, pixmap in enumerate(reversed(self.pixmaps)):
+            offset = i * spacing
+            rect = QRect(offset, offset, inner_size, inner_size)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(40, 40, 40))
+            painter.drawRoundedRect(rect, 4, 4)
+            painter.drawPixmap(rect, pixmap)
+            
+        if self.show_plus:
+            offset = (len(self.pixmaps) - 1) * spacing
+            rect = QRect(offset, offset, inner_size, inner_size)
+            painter.setPen(QColor(255, 255, 255, 180))
+            painter.setFont(self.font())
+            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "+")
+
+    def set_invalid(self, invalid):
+        self.is_invalid = invalid
+        self.update()
+
+class InvalidableLabel(QLabel):
+    def __init__(self):
+        super().__init__()
+        self.is_invalid = False
+        
+    def set_invalid(self, invalid):
+        self.is_invalid = invalid
+        self.update()
+        
+    def paintEvent(self, event):
+        pix = self.pixmap()
+        if pix and not pix.isNull():
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            x = (self.width() - pix.width()) // 2
+            y = (self.height() - pix.height()) // 2
+            painter.save()
+            path = QPainterPath()
+            path.addRoundedRect(QRectF(x, y, pix.width(), pix.height()), 6, 6)
+            painter.setClipPath(path)
+            painter.drawPixmap(x, y, pix)
+            painter.restore()
+            if getattr(self, "is_invalid", False):
+                painter.fillRect(self.rect(), QColor(20, 20, 20, 160))
+                pen = painter.pen()
+                pen.setColor(QColor(255, 100, 100, 200))
+                pen.setWidth(2)
+                painter.setPen(pen)
+                y_line = self.height() // 2
+                painter.drawLine(0, y_line, self.width(), y_line)
+        else:
+            super().paintEvent(event)
+            if getattr(self, "is_invalid", False):
+                painter = QPainter(self)
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                painter.fillRect(self.rect(), QColor(20, 20, 20, 160))
+                pen = painter.pen()
+                pen.setColor(QColor(255, 100, 100, 200))
+                pen.setWidth(2)
+                painter.setPen(pen)
+                y_line = self.height() // 2
+                painter.drawLine(0, y_line, self.width(), y_line)
+
+# SVG Paths
+PATH_PIN = '<path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/>'
+PATH_TRASH = '<polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>'
+PATH_PAUSE = '<rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect>'
+PATH_PLAY = '<polygon points="5 3 19 12 5 21 5 3"></polygon>'
+PATH_SETTINGS = '<circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>'
+PATH_FILE = '<path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline>'
+PATH_LINK = '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>'
+PATH_FOLDER = '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>'
+PATH_GLOBE = '<circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>'
+PATH_X = '<line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>'
+PATH_IMAGE = '<rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline>'
+PATH_COLOR = '<path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path>'
+PATH_TEXT = '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline>'
+
+def _format_size(size):
+    for unit in ['B', 'KB', 'MB', 'GB']:
+        if size < 1024.0:
+            return f'{size:.0f} {unit}' if unit in ['B', 'KB'] else f'{size:.1f} {unit}'
+        size /= 1024.0
+    return f'{size:.1f} TB'
+
+class SubItemWidget(QFrame):
+    copy_clicked = pyqtSignal(str)
+    
+    def __init__(self, file_path, parent_id=None, audio=None):
+        super().__init__()
+        self.file_path = file_path
+        self.parent_id = parent_id
+        self.audio = audio
+        self.setStyleSheet("""
+            SubItemWidget {
+                background-color: transparent;
+                border-radius: 4px;
+                border: 1px solid transparent;
+            }
+            SubItemWidget:hover {
+                background-color: rgba(50, 50, 50, 150);
+                border: 1px solid rgba(255, 255, 255, 20);
+            }
+        """)
+        self.setFixedHeight(36)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(10)
+        icon_lbl = QLabel()
+        icon_lbl.setFixedSize(24, 24)
+        has_thumb = False
+        if os.path.exists(file_path):
+            ext = os.path.splitext(file_path)[1].lower()
+            if ext in ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp']:
+                from PyQt6.QtGui import QPixmap
+                img = QPixmap(file_path)
+                if not img.isNull():
+                    img = img.scaled(24, 24, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
+                    
+                    # Apply rounded corners to thumbnail
+                    from PyQt6.QtGui import QPainter, QPainterPath
+                    from PyQt6.QtCore import QRectF
+                    rounded = QPixmap(24, 24)
+                    rounded.fill(Qt.GlobalColor.transparent)
+                    painter = QPainter(rounded)
+                    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                    path = QPainterPath()
+                    path.addRoundedRect(QRectF(0, 0, 24, 24), 4, 4)
+                    painter.setClipPath(path)
+                    
+                    # Center the cropped image
+                    x = (24 - img.width()) // 2
+                    y = (24 - img.height()) // 2
+                    painter.drawPixmap(x, y, img)
+                    painter.end()
+                    
+                    icon_lbl.setPixmap(rounded)
+                    has_thumb = True
+                    
+        if not has_thumb:
+            from PyQt6.QtWidgets import QFileIconProvider
+            from PyQt6.QtCore import QFileInfo
+            provider = QFileIconProvider()
+            icon = provider.icon(QFileInfo(file_path))
+            if not icon.isNull():
+                icon_lbl.setPixmap(icon.pixmap(24, 24))
+                
+        layout.addWidget(icon_lbl)
+        v_layout = QVBoxLayout()
+        v_layout.setSpacing(2)
+        v_layout.setContentsMargins(0, 0, 0, 0)
+        name_lbl = QLabel(os.path.basename(file_path))
+        name_lbl.setStyleSheet("color: #e0e0e0; font-size: 11px;")
+        size_lbl = QLabel(_format_size(os.path.getsize(file_path)) if os.path.exists(file_path) else "Missing")
+        size_lbl.setStyleSheet("color: #888888; font-size: 9px;")
+        v_layout.addWidget(name_lbl)
+        v_layout.addWidget(size_lbl)
+        layout.addLayout(v_layout)
+        layout.addStretch()
+        
+        dir_btn = SvgButton(PATH_FOLDER, size=12, color="#666666", hover_color="#ffffff")
+        dir_btn.setToolTip("Open folder")
+        def open_dir():
+            if os.path.exists(self.file_path):
+                if os.path.isdir(self.file_path): os.startfile(self.file_path)
+                else: os.startfile(os.path.dirname(self.file_path))
+        dir_btn.clicked.connect(open_dir)
+        layout.addWidget(dir_btn)
+        
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.drag_start_position = event.pos()
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+        
+    def mouseMoveEvent(self, event):
+        if not (event.buttons() & Qt.MouseButton.LeftButton):
+            return
+        if (event.pos() - self.drag_start_position).manhattanLength() < QApplication.startDragDistance():
+            return
+        drag = QDrag(self)
+        mimedata = QMimeData()
+        if os.path.exists(self.file_path):
+            mimedata.setUrls([QUrl.fromLocalFile(self.file_path)])
+            
+        if hasattr(self, 'parent_id') and self.parent_id:
+            from PyQt6.QtCore import QByteArray
+            mimedata.setData("edgedrop/internal-drag-subitem", QByteArray(self.parent_id.encode('utf-8')))
+            
+        drag.setMimeData(mimedata)
+        
+        # Add visual preview of the dragged item
+        pixmap = self.grab()
+        drag.setPixmap(pixmap)
+        drag.setHotSpot(event.pos())
+        shelf = self.window()
+        shelf.is_dragging = True
+        shelf.active_drag_is_top_level = False
+        
+        if hasattr(self, 'parent_id') and self.parent_id:
+            shelf.active_drag_source_id = self.parent_id
+            
+        drag.exec(Qt.DropAction.CopyAction | Qt.DropAction.MoveAction, Qt.DropAction.CopyAction)
+        
+        shelf.is_dragging = False
+        shelf.active_drag_source_id = None
+        if hasattr(shelf, '_check_close'): shelf._check_close()
+        
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            if hasattr(self, 'drag_start_position') and (event.pos() - self.drag_start_position).manhattanLength() < QApplication.startDragDistance():
+                if self.audio: self.audio.play_copy()
+                self.setStyleSheet("SubItemWidget { background-color: #306b34; border-radius: 4px; border: 1px solid #4CAF50; }")
+                from PyQt6.QtCore import QTimer
+                QTimer.singleShot(300, lambda: self.setStyleSheet("""
+                    SubItemWidget {
+                        background-color: transparent;
+                        border-radius: 4px;
+                        border: 1px solid transparent;
+                    }
+                    SubItemWidget:hover {
+                        background-color: rgba(50, 50, 50, 150);
+                        border: 1px solid rgba(255, 255, 255, 20);
+                    }
+                """))
+                self.copy_clicked.emit(self.file_path)
+                event.accept()
+                return
+        super().mouseReleaseEvent(event)
+import colorsys
+
+def parse_color_string(s):
+    s = str(s).strip()
+    
+    import re
+    hex_match = re.match(r'^#?([0-9a-fA-F]{3,8})$', s)
+    if hex_match:
+        val = hex_match.group(1)
+        if len(val) in [3, 4, 6, 8]:
+            return '#' + val
+            
+    rgb_match = re.match(r'^rgba?\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([\d.]+))?\s*\)$', s, re.IGNORECASE)
+    if rgb_match:
+        r, g, b = int(rgb_match.group(1)), int(rgb_match.group(2)), int(rgb_match.group(3))
+        a = float(rgb_match.group(4)) if rgb_match.group(4) else 1.0
+        return f"rgba({r}, {g}, {b}, {a})"
+        
+    hsl_match = re.match(r'^hsla?\s*\(\s*([\d.]+)\s*,\s*([\d.]+)%?\s*,\s*([\d.]+)%?(?:\s*,\s*([\d.]+))?\s*\)$', s, re.IGNORECASE)
+    if hsl_match:
+        h = float(hsl_match.group(1)) / 360.0
+        s_val = float(hsl_match.group(2)) / 100.0
+        l_val = float(hsl_match.group(3)) / 100.0
+        a = float(hsl_match.group(4)) if hsl_match.group(4) else 1.0
+        r, g, b = colorsys.hls_to_rgb(h, l_val, s_val)
+        return f"rgba({int(r*255)}, {int(g*255)}, {int(b*255)}, {a})"
+        
+    return None
+
+
+class ItemCard(QFrame):
+    delete_clicked = pyqtSignal(str)
+    pin_clicked = pyqtSignal(str)
+    copy_clicked = pyqtSignal(object)
+
+    def __init__(self, item, shelf_width, audio=None):
+        super().__init__()
+        self.item = item
+        self.item_id = item.get("id")
+        self.audio = audio
+        self.shelf_width = shelf_width
+        self.drag_start_position = QPoint()
+        
+        self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setObjectName("ItemCard")
+        self.setStyleSheet("""
+            #ItemCard {
+                background-color: rgba(26, 26, 26, 200);
+                border-radius: 8px;
+                border: 1px solid rgba(255, 255, 255, 10);
+            }
+            #ItemCard:hover {
+                background-color: rgba(40, 40, 40, 220);
+                border: 1px solid rgba(255, 255, 255, 30);
+            }
+        """)
+        self.setFixedWidth(self.shelf_width - 50)
+        self.setAcceptDrops(True)
+        
+        self.stack_overlay = QLabel("Drop here to stack", self)
+        self.stack_overlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.stack_overlay.setStyleSheet("""
+            background-color: rgba(30, 30, 30, 230);
+            color: #ffffff;
+            font-size: 14px;
+            font-weight: bold;
+            border: 2px dashed #4CAF50;
+            border-radius: 8px;
+        """)
+        self.stack_overlay.hide()
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        
+        item_type = item.get("type", "text")
+        content = item.get("content", "")
+        
+        parsed_color = None
+        if item_type == "text":
+            parsed_color = parse_color_string(content)
+                
+        if item_type == "link": icon_path = PATH_LINK
+        elif item_type == "file": icon_path = PATH_FILE
+        elif item_type == "files": icon_path = PATH_FOLDER
+        elif item_type == "image": icon_path = PATH_IMAGE
+        elif parsed_color: icon_path = PATH_COLOR
+        else: icon_path = PATH_TEXT
+        
+        icon_lbl = SvgLabel(icon_path, size=16, color="#aaaaaa")
+        icon_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        header.addWidget(icon_lbl)
+        
+        time_text = utils.format_relative_time(item.get("timestamp"))
+        time_lbl = QLabel(time_text)
+        time_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        time_lbl.setStyleSheet("color: #555555; font-size: 10px; margin-left: 5px;")
+        header.addWidget(time_lbl)
+        
+        if item_type == "link":
+            act_btn = SvgButton(PATH_GLOBE, size=14, color="#888888")
+            act_btn.setToolTip("Open link in browser")
+            act_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(self.item.get("content"))))
+            header.addWidget(act_btn)
+        elif item_type == "file":
+            act_btn = SvgButton(PATH_FOLDER, size=14, color="#888888")
+            act_btn.setToolTip("Open folder")
+            def open_dir():
+                path = self.item.get("content")
+                if os.path.isdir(path): os.startfile(path)
+                else: os.startfile(os.path.dirname(path))
+            act_btn.clicked.connect(open_dir)
+            header.addWidget(act_btn)
+        elif item_type == "files":
+            files = self.item.get("content", [])
+            if files:
+                dirs = set(os.path.normcase(os.path.dirname(p)) for p in files)
+                if len(dirs) == 1:
+                    act_btn = SvgButton(PATH_FOLDER, size=14, color="#888888")
+                    act_btn.setToolTip("Open folder")
+                    def open_group_dir():
+                        d = list(dirs)[0]
+                        if os.path.isdir(d): os.startfile(d)
+                    act_btn.clicked.connect(open_group_dir)
+                    header.addWidget(act_btn)
+            
+        header.addStretch()
+        
+        is_pinned = item.get("pinned", False)
+        self.pin_btn = SvgButton(PATH_PIN, size=16, color="#666666", hover_color="#ffffff")
+        self.pin_btn.setToolTip("Pin item")
+        self.pin_btn.set_active(is_pinned)
+        self.pin_btn.clicked.connect(self.on_pin)
+        header.addWidget(self.pin_btn)
+        
+        self.del_btn = SvgButton(PATH_X, size=16, color="#666666", hover_color="#ff4444")
+        self.del_btn.setToolTip("Remove item")
+        self.del_btn.clicked.connect(self.on_delete)
+        header.addWidget(self.del_btn)
+        
+        layout.addLayout(header)
+        
+        content = item.get("content", "")
+        self.expanded = False
+        self.full_content = content
+        
+        content_layout = QHBoxLayout()
+        
+        if item_type == "file":
+            file_vlayout = QVBoxLayout()
+            ext = os.path.splitext(content)[1].lower()
+            if ext in ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'] and os.path.exists(content):
+                from PyQt6.QtGui import QPixmap
+                self.icon_widget = InvalidableLabel()
+                pixmap = QPixmap(content)
+                if not pixmap.isNull():
+                    pixmap = pixmap.scaled(self.shelf_width - 40, 120, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                    self.icon_widget.setPixmap(pixmap)
+                    self.icon_widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                    self.icon_widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+                    file_vlayout.addWidget(self.icon_widget)
+            elif os.path.exists(content):
+                from PyQt6.QtWidgets import QFileIconProvider
+                from PyQt6.QtCore import QFileInfo
+                provider = QFileIconProvider()
+                icon = provider.icon(QFileInfo(content))
+                if not icon.isNull():
+                    self.icon_widget = InvalidableLabel()
+                    self.icon_widget.setPixmap(icon.pixmap(48, 48))
+                    self.icon_widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                    self.icon_widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+                    file_vlayout.addWidget(self.icon_widget)
+            filename = os.path.basename(content)
+            self.lbl = QLabel(filename)
+            self.lbl.setWordWrap(True)
+            self.lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            self.lbl.setStyleSheet("color: #ffffff; font-size: 14px; font-weight: bold; background: transparent;")
+            file_vlayout.addWidget(self.lbl)
+            path_lbl = QLabel(os.path.dirname(content))
+            path_lbl.setWordWrap(True)
+            path_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            path_lbl.setStyleSheet("color: #888888; font-size: 11px; background: transparent;")
+            file_vlayout.addWidget(path_lbl)
+            content_layout.addLayout(file_vlayout)
+        elif item_type == "image":
+            img_vlayout = QVBoxLayout()
+            from PyQt6.QtGui import QPixmap
+            img = QPixmap(content)
+            if not img.isNull():
+                self.icon_widget = InvalidableLabel()
+                pixmap = img.scaled(self.shelf_width - 40, 120, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                self.icon_widget.setPixmap(pixmap)
+                self.icon_widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.icon_widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+                img_vlayout.addWidget(self.icon_widget)
+            content_layout.addLayout(img_vlayout)
+        elif item_type == "files":
+            files_vlayout = QVBoxLayout()
+            self.summary_widget = QWidget()
+            summary_layout = QVBoxLayout(self.summary_widget)
+            summary_layout.setContentsMargins(0,0,0,0)
+            self.title_lbl = QLabel("Folder" if len(content) == 1 and os.path.isdir(content[0]) else f"{len(content)} files")
+            self.title_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            self.title_lbl.setStyleSheet("color: #ffffff; font-size: 14px; font-weight: bold; background: transparent;")
+            summary_layout.addWidget(self.title_lbl)
+            self.summary_body_widget = QWidget()
+            body_hlayout = QHBoxLayout(self.summary_body_widget)
+            body_hlayout.setContentsMargins(0, 0, 0, 0)
+            
+            icons_vlayout = QVBoxLayout()
+            icons_vlayout.setSpacing(0)
+            icons_vlayout.setContentsMargins(0, 0, 0, 0)
+            from PyQt6.QtWidgets import QFileIconProvider
+            from PyQt6.QtCore import QFileInfo
+            provider = QFileIconProvider()
+            selected_paths = []
+            seen_exts = set()
+            for path in content:
+                ext = os.path.splitext(path)[1].lower()
+                if ext not in seen_exts:
+                    seen_exts.add(ext)
+                    selected_paths.append(path)
+                    if len(selected_paths) == 3: break
+            if len(selected_paths) < 3:
+                for path in content:
+                    if path not in selected_paths:
+                        selected_paths.append(path)
+                        if len(selected_paths) == 3: break
+            pixmaps = []
+            for path in selected_paths:
+                if os.path.exists(path):
+                    ext = os.path.splitext(path)[1].lower()
+                    if ext in ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp']:
+                        from PyQt6.QtGui import QPixmap
+                        img = QPixmap(path)
+                        if not img.isNull():
+                            img = img.scaled(32, 32, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
+                            pixmaps.append(img)
+                            continue
+                    icon = provider.icon(QFileInfo(path))
+                    if not icon.isNull():
+                        pixmaps.append(icon.pixmap(32, 32))
+            if pixmaps:
+                self.icon_widget = StackedIconsWidget(pixmaps, size=32, show_plus=len(content)>3)
+                self.icon_widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+                icons_vlayout.addWidget(self.icon_widget)
+            icons_vlayout.addStretch()
+            body_hlayout.addLayout(icons_vlayout)
+            file_names = [f"• {os.path.basename(p)}" for p in content]
+            display_text = "\n".join(file_names) if len(content) <= 4 else "\n".join(file_names[:3]) + f"\n... e mais {len(content) - 3}"
+            self.lbl = QLabel(display_text)
+            self.lbl.setWordWrap(True)
+            self.lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            self.lbl.setStyleSheet("color: #cccccc; font-size: 12px; background: transparent;")
+            self.lbl.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+            body_hlayout.addWidget(self.lbl, stretch=1)
+            summary_layout.addWidget(self.summary_body_widget)
+            files_vlayout.addWidget(self.summary_widget)
+            self.expanded_widget = QWidget()
+            expanded_layout = QVBoxLayout(self.expanded_widget)
+            expanded_layout.setContentsMargins(0, 0, 0, 0)
+            expanded_layout.setSpacing(2)
+            for path in content:
+                sub_item = SubItemWidget(path, parent_id=self.item.get("id"), audio=self.audio)
+                sub_item.copy_clicked.connect(self._on_subitem_copy)
+                expanded_layout.addWidget(sub_item)
+            self.expanded_widget.setMaximumHeight(0)
+            self.expanded_widget.setVisible(False)
+            self.expand_anim = QPropertyAnimation(self.expanded_widget, b"maximumHeight")
+            self.expand_anim.setDuration(250)
+            self.expand_anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
+            
+            self.summary_anim = QPropertyAnimation(self.summary_body_widget, b"maximumHeight")
+            self.summary_anim.setDuration(250)
+            self.summary_anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
+            
+            from PyQt6.QtCore import QParallelAnimationGroup
+            self.anim_group = QParallelAnimationGroup(self)
+            self.anim_group.addAnimation(self.expand_anim)
+            self.anim_group.addAnimation(self.summary_anim)
+            
+            files_vlayout.addWidget(self.expanded_widget)
+            content_layout.addLayout(files_vlayout)
+        else:
+            if parsed_color:
+                color_sq = QLabel()
+                color_sq.setFixedSize(16, 16)
+                color_sq.setStyleSheet(f"background-color: {parsed_color}; border-radius: 4px;")
+                color_sq.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+                content_layout.addWidget(color_sq)
+            display_text = content if len(content) < 120 else content[:120] + "..."
+            self.lbl = QLabel(display_text)
+            self.lbl.setWordWrap(True)
+            self.lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            self.lbl.setStyleSheet("color: #e0e0e0; font-size: 13px; background: transparent;")
+            content_layout.addWidget(self.lbl)
+        layout.addLayout(content_layout)
+        self.check_validity()
+
+    def _on_subitem_copy(self, path):
+        self.copy_clicked.emit({"type": "file", "content": path})
+
+    def check_validity(self):
+        item_type = self.item.get("type", "text")
+        content = self.item.get("content", "")
+        self.is_invalid = False
+        if item_type == "file":
+            if not os.path.exists(content):
+                self.is_invalid = True
+                if hasattr(self, 'lbl'): self.lbl.setStyleSheet("color: #666666; font-size: 14px; font-weight: bold; background: transparent; text-decoration: line-through;")
+                if hasattr(self, 'icon_widget'): self.icon_widget.set_invalid(True)
+            else:
+                if hasattr(self, 'lbl'): self.lbl.setStyleSheet("color: #ffffff; font-size: 14px; font-weight: bold; background: transparent; text-decoration: none;")
+                if hasattr(self, 'icon_widget'): self.icon_widget.set_invalid(False)
+        elif item_type == "files":
+            missing = any(not os.path.exists(p) for p in content)
+            if missing:
+                self.is_invalid = True
+                if hasattr(self, 'title_lbl'): self.title_lbl.setStyleSheet("color: #666666; font-size: 14px; font-weight: bold; background: transparent; text-decoration: line-through;")
+                if hasattr(self, 'icon_widget'): self.icon_widget.set_invalid(True)
+            else:
+                if hasattr(self, 'title_lbl'): self.title_lbl.setStyleSheet("color: #ffffff; font-size: 14px; font-weight: bold; background: transparent; text-decoration: none;")
+                if hasattr(self, 'icon_widget'): self.icon_widget.set_invalid(False)
+
+    def on_pin(self):
+        if self.audio: self.audio.play_toggle()
+        self.pin_clicked.emit(self.item_id)
+        
+    def on_delete(self):
+        if self.audio: self.audio.play_delete()
+        self.delete_clicked.emit(self.item_id)
+        
+    def resizeEvent(self, event):
+        if hasattr(self, 'stack_overlay'):
+            self.stack_overlay.resize(self.size())
+        super().resizeEvent(event)
+        
+    def dragEnterEvent(self, event):
+        shelf = self.window()
+        # Do not accept drag if it comes from ourselves
+        if getattr(shelf, 'active_drag_source_id', None) == self.item_id:
+            event.ignore()
+            return
+            
+        if event.mimeData().hasUrls() or event.mimeData().hasText() or event.mimeData().hasImage() or event.mimeData().hasFormat("edgedrop/internal-drag-item"):
+            self.stack_overlay.show()
+            self.stack_overlay.raise_()
+            event.acceptProposedAction()
+            
+    def dragMoveEvent(self, event):
+        shelf = self.window()
+        if getattr(shelf, 'active_drag_source_id', None) == self.item_id:
+            event.ignore()
+            return
+            
+        if event.mimeData().hasUrls() or event.mimeData().hasText() or event.mimeData().hasImage() or event.mimeData().hasFormat("edgedrop/internal-drag-item"):
+            event.acceptProposedAction()
+            
+    def dragLeaveEvent(self, event):
+        if hasattr(self, 'stack_overlay'):
+            self.stack_overlay.hide()
+        super().dragLeaveEvent(event)
+        
+    def dropEvent(self, event):
+        if hasattr(self, 'stack_overlay'):
+            self.stack_overlay.hide()
+            
+        shelf = self.window()
+        mime = event.mimeData()
+        source_id = None
+        is_internal = False
+        
+        # Check internal drags first
+        if mime.hasFormat("edgedrop/internal-drag-item"):
+            source_id = str(mime.data("edgedrop/internal-drag-item"), 'utf-8')
+            is_internal = True
+        elif mime.hasFormat("edgedrop/internal-drag-subitem"):
+            source_id = str(mime.data("edgedrop/internal-drag-subitem"), 'utf-8')
+            is_internal = True
+            
+        if source_id == self.item_id:
+            event.ignore()
+            return
+            
+        source_data = None
+        if mime.hasUrls():
+            urls = [u.toLocalFile() for u in mime.urls() if u.isLocalFile()]
+            if urls:
+                source_data = urls if len(urls) > 1 else urls[0]
+        elif mime.hasText():
+            source_data = mime.text()
+            
+        if not source_data and mime.hasFormat("edgedrop/internal-drag-item"):
+            # If it's an internal item drag but no urls (e.g. text/link item), we need to fetch its data
+            source_item = next((x for x in shelf.clipboard_watcher.get_history() if x.get("id") == source_id), None)
+            if source_item:
+                source_data = source_item.get("content")
+                
+        if source_data:
+            shelf.clipboard_watcher.stack_items(self.item_id, source_data, source_id, is_internal)
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.drag_start_position = event.pos()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if not (event.buttons() & Qt.MouseButton.LeftButton):
+            return
+        if (event.pos() - self.drag_start_position).manhattanLength() < QApplication.startDragDistance():
+            return
+        if getattr(self, "is_invalid", False):
+            return
+        drag = QDrag(self)
+        mimedata = QMimeData()
+        content = self.item.get("content")
+        if isinstance(content, str): content = content.strip()
+        if self.item.get("type") == "files":
+            urls = [QUrl.fromLocalFile(p.strip()) for p in self.item.get("content", []) if os.path.exists(p.strip())]
+            mimedata.setUrls(urls)
+        elif self.item.get("type") == "file" and os.path.exists(content):
+            url = QUrl.fromLocalFile(content)
+            mimedata.setUrls([url])
+        elif self.item.get("type") == "image" and os.path.exists(content):
+            url = QUrl.fromLocalFile(content)
+            mimedata.setUrls([url])
+        else:
+            mimedata.setText(content)
+            mimedata.setHtml(f"<html><body>{content}</body></html>")
+        drag.setMimeData(mimedata)
+        
+        from PyQt6.QtCore import QByteArray
+        mimedata.setData("edgedrop/internal-drag-item", QByteArray(self.item_id.encode('utf-8')))
+        
+        # Add visual preview of the dragged card
+        pixmap = self.grab()
+        drag.setPixmap(pixmap)
+        drag.setHotSpot(event.pos())
+        shelf = self.window()
+        shelf.is_dragging = True
+        shelf.active_drag_is_top_level = True
+        
+        drag.exec(Qt.DropAction.CopyAction | Qt.DropAction.MoveAction, Qt.DropAction.CopyAction)
+        
+        shelf.is_dragging = False
+        shelf.active_drag_is_top_level = False
+        shelf._check_close()
+        self.check_validity()
+        
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            if hasattr(self, 'drag_start_position') and (event.pos() - self.drag_start_position).manhattanLength() < QApplication.startDragDistance():
+                if getattr(self, "is_invalid", False): return
+                if self.audio: self.audio.play_copy()
+                self.setStyleSheet("#ItemCard { background-color: #306b34; border-radius: 8px; border: 1px solid #4CAF50; }")
+                self.copy_clicked.emit(self.item)
+                QTimer.singleShot(300, lambda: self.setStyleSheet("""
+                    #ItemCard {
+                        background-color: rgba(26, 26, 26, 200);
+                        border-radius: 8px;
+                        border: 1px solid rgba(255, 255, 255, 10);
+                    }
+                    #ItemCard:hover {
+                        background-color: rgba(40, 40, 40, 220);
+                        border: 1px solid rgba(255, 255, 255, 30);
+                    }
+                """))
+        elif event.button() == Qt.MouseButton.RightButton:
+            if self.item.get("type") == "files":
+                is_expanded = self.expanded_widget.maximumHeight() > 0
+                
+                if not is_expanded:
+                    self.expanded_widget.setVisible(True)
+                    # We need the full heights to animate to/from
+                    exp_target = self.expanded_widget.sizeHint().height()
+                    sum_target = self.summary_body_widget.sizeHint().height()
+                    
+                    self.expand_anim.setStartValue(0)
+                    self.expand_anim.setEndValue(exp_target)
+                    
+                    self.summary_anim.setStartValue(sum_target)
+                    self.summary_anim.setEndValue(0)
+                    
+                    self.anim_group.start()
+                    
+                    def on_expand_finish():
+                        try: self.anim_group.finished.disconnect(on_expand_finish)
+                        except: pass
+                        self.summary_body_widget.setVisible(False)
+                    self.anim_group.finished.connect(on_expand_finish)
+                    
+                else:
+                    exp_target = self.expanded_widget.sizeHint().height()
+                    sum_target = self.summary_body_widget.sizeHint().height()
+                    
+                    self.expand_anim.setStartValue(exp_target)
+                    self.expand_anim.setEndValue(0)
+                    
+                    self.summary_body_widget.setVisible(True)
+                    self.summary_anim.setStartValue(0)
+                    self.summary_anim.setEndValue(sum_target)
+                    
+                    def on_finish():
+                        try: self.anim_group.finished.disconnect(on_finish)
+                        except: pass
+                        self.expanded_widget.setVisible(False)
+                    self.anim_group.finished.connect(on_finish)
+                    self.anim_group.start()
+                    
+                if self.audio: self.audio.play_toggle()
+        super().mouseReleaseEvent(event)
+
+
+class EdgeDropShelf(QWidget):
+    def __init__(self, clipboard_watcher, config, audio=None):
+        super().__init__()
+        self.clipboard_watcher = clipboard_watcher
+        self.config = config
+        self.audio = audio
+        self.hotkey_manager = None
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_AlwaysShowToolTips, True)
+        self.shelf_width = self.config.get("shelf_width")
+        self.screen_width, self.screen_height = utils.get_screen_size()
+        self.shelf_height = int(self.screen_height * 0.8)
+        self.y_pos = int((self.screen_height - self.shelf_height) / 2)
+        self.edge_side = self.config.get("edge_side")
+        self._calc_positions()
+        self.setGeometry(self.x_hidden, self.y_pos, self.shelf_width, self.shelf_height)
+        self.is_open = False
+        self.is_settings_view = False
+        self.animation = QPropertyAnimation(self, b"pos")
+        self.animation.setDuration(300)
+        self.animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self.setAcceptDrops(True)
+        self.item_widgets = {}
+        self._setup_ui()
+        self.load_history()
+        self.clipboard_watcher.new_item.connect(lambda item: self.add_clipboard_item(item, to_top=True))
+        if hasattr(self.clipboard_watcher, 'history_changed'):
+            self.clipboard_watcher.history_changed.connect(self.load_history)
+
+    def _calc_positions(self):
+        if self.edge_side == "left":
+            self.x_hidden = -self.shelf_width
+            self.x_visible = 0
+        else:
+            self.x_hidden = self.screen_width
+            self.x_visible = self.screen_width - self.shelf_width
+            
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        path = QPainterPath()
+        r = 15
+        w = self.width()
+        h = self.height()
+        if getattr(self, "edge_side", "left") == "left":
+            path.moveTo(w - r, r)
+            path.arcTo(w - r*2, r, r*2, r*2, 90, -90)
+            path.lineTo(w, h - r*2)
+            path.arcTo(w - r*2, h - r*3, r*2, r*2, 0, -90)
+            path.lineTo(r, h - r)
+            path.quadTo(0, h - r, 0, h)
+            path.lineTo(0, 0)
+            path.quadTo(0, r, r, r)
+            path.lineTo(w - r, r)
+        else:
+            path.moveTo(r, r)
+            path.arcTo(0, r, r*2, r*2, 90, 90)
+            path.lineTo(0, h - r*2)
+            path.arcTo(0, h - r*3, r*2, r*2, 180, 90)
+            path.lineTo(w - r, h - r)
+            path.quadTo(w, h - r, w, h)
+            path.lineTo(w, 0)
+            path.quadTo(w, r, w - r, r)
+            path.lineTo(r, r)
+            
+        is_translucent = self.config.get("translucent_background")
+        bg_alpha = 180 if is_translucent else 255
+        painter.fillPath(path, QColor(0, 0, 0, bg_alpha))
+        
+        header_path = QPainterPath()
+        header_path.addRect(QRectF(0, 0, w, r + 45))
+        intersected = path.intersected(header_path)
+        painter.fillPath(intersected, QColor(17, 17, 17, bg_alpha))
+        
+        pen = painter.pen()
+        pen.setColor(QColor(34, 34, 34, 255)) # #222
+        pen.setWidth(1)
+        painter.setPen(pen)
+        painter.drawPath(path)
+            
+    def _setup_ui(self):
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(15, 15, 15, 15)
+        main_layout.setSpacing(0)
+        
+        self.bg_frame = QFrame()
+        self.bg_frame.setObjectName("BgFrame")
+        self.bg_frame.setStyleSheet("background: transparent; border: none;")
+        
+        bg_layout = QVBoxLayout(self.bg_frame)
+        bg_layout.setContentsMargins(0, 0, 0, 0)
+        bg_layout.setSpacing(0)
+        
+        # Header
+        self.header = QFrame()
+        self.header.setFixedHeight(45)
+        self.header.setStyleSheet("background: transparent; border: none;")
+        h_layout = QHBoxLayout(self.header)
+        h_layout.setContentsMargins(15, 0, 15, 0)
+        
+        title = QLabel("Py-Drop")
+        title.setStyleSheet("color: white; font-size: 14px; font-weight: bold;")
+        h_layout.addWidget(title)
+        
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Search...")
+        self.search_input.setStyleSheet("background: #222; color: white; border: none; border-radius: 4px; padding: 2px 5px;")
+        self.search_input.textChanged.connect(self._on_search)
+        h_layout.addWidget(self.search_input)
+        
+        trash_btn = SvgButton(PATH_TRASH, size=16, color="#888888", hover_color="#ff4444")
+        trash_btn.setToolTip("Clear unpinned items")
+        trash_btn.clicked.connect(self._clear_unpinned)
+        h_layout.addWidget(trash_btn)
+        
+        self.pause_btn = SvgButton(PATH_PAUSE, size=16, color="#888888", hover_color="#ffffff")
+        self.pause_btn.setToolTip("Pause/Resume clipboard watching")
+        self.pause_btn.clicked.connect(self._toggle_pause)
+        h_layout.addWidget(self.pause_btn)
+        
+        self.settings_btn = SvgButton(PATH_SETTINGS, size=16, color="#888888", hover_color="#ffffff")
+        self.settings_btn.setToolTip("Settings")
+        self.settings_btn.clicked.connect(self._toggle_settings)
+        h_layout.addWidget(self.settings_btn)
+        
+        bg_layout.addWidget(self.header)
+        
+        self.stacked = QStackedWidget()
+        bg_layout.addWidget(self.stacked)
+        
+        # Main View
+        self.main_view = QWidget()
+        v_layout = QVBoxLayout(self.main_view)
+        v_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll.setStyleSheet("QScrollArea { border: none; background: transparent; } QScrollBar:vertical { background: #111; width: 8px; } QScrollBar::handle:vertical { background: #444; border-radius: 4px; }")
+        
+        self.scroll_content = QWidget()
+        self.scroll_content.setStyleSheet("background: transparent;")
+        self.items_layout = QVBoxLayout(self.scroll_content)
+        self.items_layout.setContentsMargins(5, 5, 5, 5)
+        self.items_layout.setSpacing(10)
+        self.items_layout.addStretch()
+        
+        self.scroll.setWidget(self.scroll_content)
+        v_layout.addWidget(self.scroll)
+        
+        self.empty_lbl = QLabel("Shelf is empty.")
+        self.empty_lbl.setStyleSheet("color: #666; font-size: 14px;")
+        self.empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        v_layout.addWidget(self.empty_lbl)
+        
+        self.stacked.addWidget(self.main_view)
+        
+        # Settings View
+        self.settings_view = QWidget()
+        self._build_settings_view()
+        self.stacked.addWidget(self.settings_view)
+        
+        bg_layout.addWidget(self.stacked)
+        main_layout.addWidget(self.bg_frame)
+        
+        # Drop overlay
+        self.drop_overlay = QLabel("Drop here", self)
+        self.drop_overlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.drop_overlay.setStyleSheet("""
+            QLabel {
+                background: rgba(30, 100, 30, 200);
+                color: white;
+                font-size: 24px;
+                font-weight: bold;
+                border: 4px dashed #4CAF50;
+                border-radius: 15px;
+            }
+        """)
+        self.drop_overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.drop_overlay.hide()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, 'drop_overlay'):
+            self.drop_overlay.setGeometry(self.rect())
+
+    def _build_settings_view(self):
+        layout = QVBoxLayout(self.settings_view)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        lbl = QLabel("Settings")
+        lbl.setStyleSheet("color: white; font-size: 18px; font-weight: bold;")
+        layout.addWidget(lbl)
+        
+        # Sound
+        self.cb_sound = QCheckBox("Enable Sound Haptics")
+        self.cb_sound.setStyleSheet("color: white;")
+        self.cb_sound.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.cb_sound.setChecked(self.config.get("sound_enabled"))
+        self.cb_sound.stateChanged.connect(lambda state: self.config.set("sound_enabled", bool(state)))
+        layout.addWidget(self.cb_sound)
+        
+        # Translucent Background
+        self.cb_translucent = QCheckBox("Translucent Background")
+        self.cb_translucent.setStyleSheet("color: white;")
+        self.cb_translucent.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.cb_translucent.setChecked(self.config.get("translucent_background"))
+        def on_translucent_change(state):
+            self.config.set("translucent_background", bool(state))
+            self.update() # trigger paintEvent to redraw background
+        self.cb_translucent.stateChanged.connect(on_translucent_change)
+        layout.addWidget(self.cb_translucent)
+        
+        # Edge side
+        lbl_side = QLabel("Edge Side")
+        lbl_side.setStyleSheet("color: #aaaaaa; margin-top: 15px;")
+        layout.addWidget(lbl_side)
+        
+        self.rb_left = QRadioButton("Left Edge")
+        self.rb_right = QRadioButton("Right Edge")
+        self.rb_left.setStyleSheet("color: white;")
+        self.rb_right.setStyleSheet("color: white;")
+        self.rb_left.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.rb_right.setCursor(Qt.CursorShape.PointingHandCursor)
+        
+        if self.edge_side == "left": self.rb_left.setChecked(True)
+        else: self.rb_right.setChecked(True)
+            
+        def on_side():
+            new_side = "left" if self.rb_left.isChecked() else "right"
+            self.config.set("edge_side", new_side)
+            self.edge_side = new_side
+            self._calc_positions()
+            if self.is_open:
+                self.setGeometry(self.x_visible, self.y_pos, self.shelf_width, self.shelf_height)
+            self.update()
+                
+        self.rb_left.toggled.connect(on_side)
+        self.rb_right.toggled.connect(on_side)
+        layout.addWidget(self.rb_left)
+        layout.addWidget(self.rb_right)
+        
+        # Sensitivity
+        lbl_sens = QLabel("Trigger Width (pixels)")
+        lbl_sens.setStyleSheet("color: #aaaaaa; margin-top: 15px;")
+        layout.addWidget(lbl_sens)
+        
+        slider = QSlider(Qt.Orientation.Horizontal)
+        slider.setRange(1, 15)
+        slider.setCursor(Qt.CursorShape.PointingHandCursor)
+        slider.setValue(self.config.get("trigger_width"))
+        slider.setStyleSheet("QSlider::handle:horizontal { background: #4CAF50; border-radius: 5px; width: 10px; }")
+        slider.valueChanged.connect(lambda val: self.config.set("trigger_width", val))
+        layout.addWidget(slider)
+        
+        # Shelf Width
+        lbl_width = QLabel("Shelf Width (pixels)")
+        lbl_width.setStyleSheet("color: #aaaaaa; margin-top: 15px;")
+        layout.addWidget(lbl_width)
+        
+        slider_width = QSlider(Qt.Orientation.Horizontal)
+        slider_width.setRange(200, 600)
+        slider_width.setValue(self.config.get("shelf_width"))
+        slider_width.setCursor(Qt.CursorShape.PointingHandCursor)
+        slider_width.setTracking(False) # Only fire when user releases the slider
+        slider_width.setStyleSheet("QSlider::handle:horizontal { background: #4CAF50; border-radius: 5px; width: 10px; }")
+        
+        def on_width_changed(val):
+            self.config.set("shelf_width", val)
+            self.shelf_width = val
+            self._calc_positions()
+            if self.is_open:
+                self.setGeometry(self.x_visible, self.y_pos, self.shelf_width, self.shelf_height)
+            self.update()
+            self.load_history() # reload cards to update their fixed width
+            
+        slider_width.valueChanged.connect(on_width_changed)
+        layout.addWidget(slider_width)
+        
+        # Hotkey
+        lbl_hk = QLabel("Global Hotkey (Click to capture)")
+        lbl_hk.setStyleSheet("color: #aaaaaa; margin-top: 15px;")
+        layout.addWidget(lbl_hk)
+        
+        self.hotkey_btn = QPushButton(self.config.get("hotkey"))
+        self.hotkey_btn.setToolTip("Click to assign a new hotkey")
+        self.hotkey_btn.setStyleSheet("background: #222; color: white; border-radius: 4px; padding: 5px; font-weight: bold;")
+        self.hotkey_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.is_capturing = False
+        
+        def on_hk_click():
+            self.is_capturing = True
+            self.hotkey_btn.setText("Listening...")
+            self.hotkey_btn.setStyleSheet("background: #4CAF50; color: white; border-radius: 4px; padding: 5px; font-weight: bold;")
+            self.hotkey_btn.setFocus()
+            
+        self.hotkey_btn.clicked.connect(on_hk_click)
+        layout.addWidget(self.hotkey_btn)
+        
+        layout.addStretch()
+        
+        # Actions
+        actions_layout = QHBoxLayout()
+        restart_btn = QPushButton("Restart App")
+        restart_btn.setToolTip("Restart Py-Drop")
+        restart_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        restart_btn.setStyleSheet("background: #222; color: #ff4444; border-radius: 4px; padding: 8px; font-weight: bold;")
+        def on_restart():
+            import sys, subprocess
+            subprocess.Popen([sys.executable] + sys.argv)
+            QApplication.quit()
+        restart_btn.clicked.connect(on_restart)
+        actions_layout.addWidget(restart_btn)
+        
+        exit_btn = QPushButton("Exit App")
+        exit_btn.setToolTip("Exit Py-Drop completely")
+        exit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        exit_btn.setStyleSheet("background: #222; color: #ff4444; border-radius: 4px; padding: 8px; font-weight: bold;")
+        exit_btn.clicked.connect(QApplication.quit)
+        actions_layout.addWidget(exit_btn)
+        
+        layout.addLayout(actions_layout)
+
+    def keyPressEvent(self, event: QKeyEvent):
+        if self.is_capturing:
+            key = event.key()
+            if key in (Qt.Key.Key_Shift, Qt.Key.Key_Control, Qt.Key.Key_Alt, Qt.Key.Key_Meta):
+                return
+                
+            mods = []
+            m = event.modifiers()
+            if m & Qt.KeyboardModifier.ControlModifier: mods.append("Ctrl")
+            if m & Qt.KeyboardModifier.ShiftModifier: mods.append("Shift")
+            if m & Qt.KeyboardModifier.AltModifier: mods.append("Alt")
+            
+            # Very basic key mapping for display
+            from PyQt6.QtGui import QKeySequence
+            key_str = QKeySequence(key).toString()
+            hk_str = "+".join(mods + [key_str])
+            
+            self.config.set("hotkey", hk_str)
+            self.hotkey_btn.setText(hk_str)
+            self.hotkey_btn.setStyleSheet("background: #222; color: white; border-radius: 4px; padding: 5px; font-weight: bold;")
+            self.is_capturing = False
+            
+            if self.hotkey_manager:
+                from hotkey import parse_hotkey_string
+                modifiers, vk = parse_hotkey_string(hk_str)
+                if vk != 0:
+                    self.hotkey_manager.start_hotkey(modifiers, vk)
+                    
+        super().keyPressEvent(event)
+
+    def set_hotkey_manager(self, manager):
+        self.hotkey_manager = manager
+
+    def _toggle_settings(self):
+        if self.audio: self.audio.play_toggle()
+        if self.is_settings_view:
+            self.stacked.setCurrentIndex(0)
+            self.settings_btn.set_active(False)
+        else:
+            self.stacked.setCurrentIndex(1)
+            self.settings_btn.set_active(True)
+        self.is_settings_view = not self.is_settings_view
+
+    def _toggle_pause(self):
+        if self.audio: self.audio.play_toggle()
+        self.clipboard_watcher.is_paused = not self.clipboard_watcher.is_paused
+        if self.clipboard_watcher.is_paused:
+            self.pause_btn.inner_html = PATH_PLAY
+            self.pause_btn.set_active(True)
+        else:
+            self.pause_btn.inner_html = PATH_PAUSE
+            self.pause_btn.set_active(False)
+
+    def _clear_unpinned(self):
+        if self.audio: self.audio.play_delete()
+        self.clipboard_watcher.clear_unpinned()
+        self.load_history()
+
+    def _on_search(self, text):
+        text = text.lower()
+        visible = 0
+        for item_id, card in self.item_widgets.items():
+            if text in card.full_content.lower():
+                card.show()
+                visible += 1
+            else:
+                card.hide()
+        
+        if visible == 0 and self.item_widgets:
+            self.empty_lbl.setText("No matches found.")
+            self.empty_lbl.show()
+        elif not self.item_widgets:
+            self.empty_lbl.setText("Shelf is empty.")
+            self.empty_lbl.show()
+        else:
+            self.empty_lbl.hide()
+
+    def handle_edge_enter(self):
+        self.open_shelf()
+
+    def handle_edge_leave(self):
+        QTimer.singleShot(100, self._check_close)
+
+    def enterEvent(self, event):
+        self.open_shelf()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        QTimer.singleShot(100, self._check_close)
+        super().leaveEvent(event)
+
+    def _check_close(self):
+        if getattr(self, "is_dragging", False):
+            return
+            
+        cx, cy = utils.get_cursor_pos()
+        # geometry() gets window position globally
+        geo = self.geometry()
+        is_inside = (geo.x() <= cx <= geo.x() + geo.width()) and (geo.y() <= cy <= geo.y() + geo.height())
+        if not is_inside:
+            self.close_shelf()
+
+    def open_shelf(self):
+        if not self.is_open:
+            for card in self.item_widgets.values():
+                if hasattr(card, 'check_validity'):
+                    card.check_validity()
+            self.is_open = True
+            if self.audio: self.audio.play_toggle()
+            self.animation.setStartValue(self.pos())
+            self.animation.setEndValue(QPoint(self.x_visible, self.y_pos))
+            self.animation.start()
+
+    def close_shelf(self):
+        if self.is_open:
+            self.is_open = False
+            self.animation.setStartValue(self.pos())
+            self.animation.setEndValue(QPoint(self.x_hidden, self.y_pos))
+            self.animation.start()
+
+    def load_history(self):
+        for w in self.item_widgets.values():
+            self.items_layout.removeWidget(w)
+            w.deleteLater()
+        self.item_widgets.clear()
+        
+        history = self.clipboard_watcher.get_history()
+        for item in reversed(history):
+            self.add_clipboard_item(item, to_top=True)
+            
+        if not history:
+            self.empty_lbl.show()
+        else:
+            self.empty_lbl.hide()
+
+    def add_clipboard_item(self, item, to_top=True):
+        self.empty_lbl.hide()
+        item_id = item.get("id")
+        
+        if item_id in self.item_widgets:
+            w = self.item_widgets[item_id]
+            self.items_layout.removeWidget(w)
+            w.deleteLater()
+            
+        card = ItemCard(item, self.shelf_width, self.audio)
+        card.copy_clicked.connect(self.clipboard_watcher.copy_to_clipboard)
+        card.delete_clicked.connect(self.delete_item)
+        card.pin_clicked.connect(self.pin_item)
+        
+        # Insert at top (index 0 is stretch, so insert at 0? No, stretch is at the end)
+        # We want newest at top. So insert at 0.
+        self.items_layout.insertWidget(0, card)
+        self.item_widgets[item_id] = card
+        
+    def delete_item(self, item_id):
+        self.clipboard_watcher.remove_item(item_id)
+        if item_id in self.item_widgets:
+            w = self.item_widgets[item_id]
+            self.items_layout.removeWidget(w)
+            w.deleteLater()
+            del self.item_widgets[item_id]
+            
+        if not self.item_widgets:
+            self.empty_lbl.setText("Shelf is empty.")
+            self.empty_lbl.show()
+
+    def pin_item(self, item_id):
+        self.clipboard_watcher.toggle_pin(item_id)
+        self.load_history()
+
+    def dragEnterEvent(self, event):
+        if getattr(self, 'active_drag_is_top_level', False):
+            event.ignore()
+            return
+            
+        if event.mimeData().hasUrls() or event.mimeData().hasText() or event.mimeData().hasImage():
+            if hasattr(self, 'drop_overlay'):
+                if hasattr(self, 'active_drag_source_id') and self.active_drag_source_id:
+                    self.drop_overlay.setText("Drop here to unstack")
+                else:
+                    self.drop_overlay.setText("Drop here")
+                self.drop_overlay.clearMask()
+                self.drop_overlay.show()
+                self.drop_overlay.raise_()
+            event.acceptProposedAction()
+            
+    def dragMoveEvent(self, event):
+        if getattr(self, 'active_drag_is_top_level', False):
+            event.ignore()
+            return
+            
+        if event.mimeData().hasUrls() or event.mimeData().hasText() or event.mimeData().hasImage():
+            if hasattr(self, 'drop_overlay'):
+                if hasattr(self, 'active_drag_source_id') and self.active_drag_source_id:
+                    card_widget = self.item_widgets.get(self.active_drag_source_id)
+                    if card_widget:
+                        from PyQt6.QtGui import QRegion
+                        from PyQt6.QtCore import QRect, QPoint
+                        mapped_top_left = card_widget.mapTo(self, QPoint(0, 0))
+                        mapped_rect = QRect(mapped_top_left, card_widget.size())
+                        
+                        if mapped_rect.contains(event.position().toPoint()):
+                            self.drop_overlay.hide()
+                        else:
+                            region = QRegion(self.rect())
+                            region -= QRegion(mapped_rect)
+                            self.drop_overlay.setMask(region)
+                            self.drop_overlay.show()
+                else:
+                    self.drop_overlay.clearMask()
+                    self.drop_overlay.show()
+            event.acceptProposedAction()
+            
+    def dragLeaveEvent(self, event):
+        if hasattr(self, 'drop_overlay'):
+            self.drop_overlay.hide()
+        super().dragLeaveEvent(event)
+    def _try_download_image(self, url_str):
+        if not url_str.startswith(('http', 'https', 'data')):
+            return False
+            
+        import urllib.request
+        import time
+        from PyQt6.QtGui import QImage
+        try:
+            req = urllib.request.Request(url_str, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'})
+            with urllib.request.urlopen(req, timeout=3) as response:
+                content_type = response.headers.get('Content-Type', '')
+                if content_type.startswith('image/'):
+                    data = response.read()
+                    img = QImage.fromData(data)
+                    if not img.isNull():
+                        images_dir = self.clipboard_watcher.storage.filepath.parent / "images"
+                        images_dir.mkdir(exist_ok=True)
+                        img_path = images_dir / f"image_{int(time.time()*1000)}.png"
+                        if img.save(str(img_path), "PNG"):
+                            self.clipboard_watcher.copy_to_clipboard({"type": "image", "content": str(img_path)}, add_to_shelf=True)
+                            return True
+        except Exception:
+            pass
+        return False
+
+    def dropEvent(self, event):
+        if hasattr(self, 'drop_overlay'):
+            self.drop_overlay.hide()
+            
+        mime = event.mimeData()
+        
+        # 0. Internal sub-item drag extraction
+        if mime.hasFormat("edgedrop/internal-drag-subitem"):
+            parent_id = bytes(mime.data("edgedrop/internal-drag-subitem")).decode('utf-8')
+            if mime.hasUrls():
+                local_files = [url.toLocalFile() for url in mime.urls() if url.isLocalFile()]
+                if local_files:
+                    # Remove from original group
+                    self.clipboard_watcher.remove_file_from_group(parent_id, local_files[0])
+                    # Add as new top-level item
+                    self.clipboard_watcher.copy_to_clipboard(local_files[0], add_to_shelf=True)
+                    self.load_history() # Force UI refresh
+                    event.acceptProposedAction()
+                    return
+                    
+        # 1. Local Files
+        if mime.hasUrls():
+            local_files = [url.toLocalFile() for url in mime.urls() if url.isLocalFile()]
+            if local_files:
+                if len(local_files) == 1:
+                    self.clipboard_watcher.copy_to_clipboard(local_files[0], add_to_shelf=True)
+                else:
+                    self.clipboard_watcher.copy_to_clipboard(local_files, add_to_shelf=True)
+                event.acceptProposedAction()
+                return
+
+        # 2. Try HTML to find an <img> tag if it's a browser drag
+        if mime.hasHtml():
+            html = mime.html()
+            import re
+            m = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', html)
+            if m:
+                img_src = m.group(1)
+                if not img_src.startswith('/'): # Ignore relative
+                    if self._try_download_image(img_src):
+                        event.acceptProposedAction()
+                        return
+                        
+        # 3. Try URLs if they are web links
+        if mime.hasUrls():
+            web_urls = [url.toString() for url in mime.urls() if url.scheme() in ('http', 'https', 'data')]
+            for w_url in web_urls:
+                if self._try_download_image(w_url):
+                    event.acceptProposedAction()
+                    return
+
+        # 4. Try Text as URL
+        if mime.hasText():
+            text = mime.text().strip()
+            if text.startswith(('http', 'https', 'data')):
+                if self._try_download_image(text):
+                    event.acceptProposedAction()
+                    return
+
+        # 5. Native Image (e.g. Snipping tool)
+        if mime.hasImage():
+            saved_path = self.clipboard_watcher.save_image_from_mime(mime)
+            if saved_path:
+                self.clipboard_watcher.copy_to_clipboard({"type": "image", "content": saved_path}, add_to_shelf=True)
+                event.acceptProposedAction()
+                return
+                
+        # 6. Fallback to raw text
+        if mime.hasText():
+            self.clipboard_watcher.copy_to_clipboard(mime.text(), add_to_shelf=True)
+            event.acceptProposedAction()
