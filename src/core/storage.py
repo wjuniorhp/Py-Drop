@@ -26,6 +26,7 @@ class Storage:
     def save(self, data):
         self._cache = data
         try:
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
             with open(self.filepath, "w", encoding="utf-8") as f:
                 json.dump(self._cache, f, indent=2, ensure_ascii=False)
         except IOError:

@@ -37,6 +37,7 @@ class Config:
 
     def save(self):
         try:
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
             with open(self.filepath, "w", encoding="utf-8") as f:
                 json.dump(self.settings, f, indent=2)
         except IOError:
