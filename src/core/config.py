@@ -13,7 +13,8 @@ DEFAULT_CONFIG = {
     "sound_enabled": False,
     "hotkey": "Ctrl+Alt+V",
     "shelf_width": 340,
-    "translucent_background": False
+    "translucent_background": False,
+    "accent_color": "#4CAF50"
 }
 
 class Config:

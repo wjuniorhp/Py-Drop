@@ -118,13 +118,19 @@ class ClipboardWatcher(QObject):
         
         if not current_list and not current_text:
             if mime.hasImage():
-                saved_path = self.save_image_from_mime(mime)
-                if saved_path:
-                    norm_path = os.path.normcase(os.path.normpath(saved_path))
-                    if norm_path == self.last_content:
+                img = mime.imageData()
+                if img and not img.isNull():
+                    import hashlib
+                    ptr = img.constBits()
+                    ptr.setsize(img.sizeInBytes())
+                    img_hash = hashlib.md5(ptr.asstring()).hexdigest()
+                    if img_hash == self.last_content:
                         return
-                    self.last_content = norm_path
-                    self.add_from_image(saved_path)
+                    self.last_content = img_hash
+                    
+                    saved_path = self.save_image_from_mime(mime)
+                    if saved_path:
+                        self.add_from_image(saved_path)
                     return
             
             if not current_text:

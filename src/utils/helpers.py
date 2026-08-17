@@ -68,13 +68,13 @@ def format_relative_time(timestamp):
         return ""
     diff = int(time.time() - timestamp)
     if diff < 60:
-        return "Just now"
+        return "Agora mesmo"
     elif diff < 3600:
-        return f"{diff // 60}m ago"
+        return f"há {diff // 60}m"
     elif diff < 86400:
-        return f"{diff // 3600}h ago"
+        return f"há {diff // 3600}h"
     else:
-        return f"{diff // 86400}d ago"
+        return f"há {diff // 86400}d"
 
 def set_click_through(hwnd, click_through=True):
     """Makes the window click-through (transparent to mouse events)."""
