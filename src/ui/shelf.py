@@ -906,6 +906,20 @@ class ItemCard(QFrame):
                 
             if not img.isNull():
                 mimedata.setImageData(img)
+                
+                # Encode to base64 and inject as HTML so Teams rich-text editor processes it as an inline pasted image
+                if is_shift_pressed:
+                    from PyQt6.QtCore import QByteArray, QBuffer, QIODevice
+                    ba = QByteArray()
+                    buffer = QBuffer(ba)
+                    buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+                    # Use a moderate quality/size to avoid massive payloads freezing the drop target
+                    scaled_img = img
+                    if img.width() > 1920 or img.height() > 1080:
+                        scaled_img = img.scaled(1920, 1080, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                    scaled_img.save(buffer, "PNG")
+                    b64 = ba.toBase64().data().decode('ascii')
+                    mimedata.setHtml(f'<html><body><img src="data:image/png;base64,{b64}"></body></html>')
         else:
             mimedata.setText(content)
             mimedata.setHtml(f"<html><body>{content}</body></html>")
