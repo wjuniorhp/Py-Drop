@@ -113,6 +113,23 @@ class ClipboardWatcher(QObject):
         
         current_text = ""
         current_list = None
+        
+        if mime.hasImage():
+            img = mime.imageData()
+            if img and not img.isNull():
+                import hashlib
+                ptr = img.constBits()
+                ptr.setsize(img.sizeInBytes())
+                img_hash = hashlib.md5(ptr.asstring()).hexdigest()
+                if img_hash == self.last_content:
+                    return
+                self.last_content = img_hash
+                
+                saved_path = self.save_image_from_mime(mime)
+                if saved_path:
+                    self.add_from_image(saved_path)
+                return
+
         if mime.hasUrls() and mime.urls():
             local_files = [u.toLocalFile() for u in mime.urls() if u.isLocalFile()]
             if local_files:
@@ -122,22 +139,6 @@ class ClipboardWatcher(QObject):
                     current_list = local_files
         
         if not current_list and not current_text:
-            if mime.hasImage():
-                img = mime.imageData()
-                if img and not img.isNull():
-                    import hashlib
-                    ptr = img.constBits()
-                    ptr.setsize(img.sizeInBytes())
-                    img_hash = hashlib.md5(ptr.asstring()).hexdigest()
-                    if img_hash == self.last_content:
-                        return
-                    self.last_content = img_hash
-                    
-                    saved_path = self.save_image_from_mime(mime)
-                    if saved_path:
-                        self.add_from_image(saved_path)
-                    return
-            
             if not current_text:
                 if mime.hasText():
                     current_text = mime.text()
