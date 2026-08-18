@@ -892,10 +892,18 @@ class ItemCard(QFrame):
             url = QUrl.fromLocalFile(content)
             mimedata.setUrls([url])
         elif self.item.get("type") == "image" and os.path.exists(content):
-            url = QUrl.fromLocalFile(content)
-            mimedata.setUrls([url])
             from PyQt6.QtGui import QImage
             img = QImage(content)
+            
+            # If the user holds SHIFT, we omit the URL and ONLY send the raw image data.
+            # This forces applications like Teams to treat it as a raw image drop (like Ctrl+V)
+            # instead of a file drop, bypassing corporate DLP file checks.
+            is_shift_pressed = bool(QApplication.keyboardModifiers() & Qt.KeyboardModifier.ShiftModifier)
+            
+            if not is_shift_pressed:
+                url = QUrl.fromLocalFile(content)
+                mimedata.setUrls([url])
+                
             if not img.isNull():
                 mimedata.setImageData(img)
         else:
