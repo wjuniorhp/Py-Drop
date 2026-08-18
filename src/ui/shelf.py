@@ -895,21 +895,36 @@ class ItemCard(QFrame):
             from PyQt6.QtGui import QImage
             img = QImage(content)
             
-            # If the user holds SHIFT, we omit the URL and ONLY send the raw image data.
-            # This forces applications like Teams to treat it as a raw image drop (like Ctrl+V)
-            # instead of a file drop, bypassing corporate DLP file checks.
             is_shift_pressed = bool(QApplication.keyboardModifiers() & Qt.KeyboardModifier.ShiftModifier)
             
-            shelf = self.window()
-            if is_shift_pressed:
-                # Stealth mode: Copy to clipboard and send dummy text. After drop, we simulate Ctrl+V.
-                shelf.clipboard_watcher.copy_to_clipboard(self.item)
-                mimedata.setText(" ")
-            else:
+            if not is_shift_pressed:
                 url = QUrl.fromLocalFile(content)
                 mimedata.setUrls([url])
-                if not img.isNull():
-                    mimedata.setImageData(img)
+                
+            if not img.isNull():
+                mimedata.setImageData(img)
+                
+            # Adiciona formato de Arquivo Virtual (FileGroupDescriptorW)
+            # Ao arrastar com SHIFT, não mandamos URL. O Teams vai ler o Arquivo Virtual na memória.
+            # Como arquivos virtuais não têm caminho de disco (são bytes na RAM), não ativam o DLP!
+            import struct
+            filename = os.path.basename(content)
+            if not filename.lower().endswith('.png'):
+                filename += '.png'
+            filename_encoded = filename.encode('utf-16-le')
+            filename_padded = filename_encoded + b'\x00' * (520 - len(filename_encoded))
+            
+            try:
+                with open(content, 'rb') as f:
+                    file_bytes = f.read()
+                fgd = struct.pack('<I I 16s 8s 8s I 8s 8s 8s I I 520s',
+                                  1, 0, b'\x00'*16, b'\x00'*8, b'\x00'*8, 0x80,
+                                  b'\x00'*8, b'\x00'*8, b'\x00'*8, 0, len(file_bytes), filename_padded)
+                from PyQt6.QtCore import QByteArray
+                mimedata.setData("FileGroupDescriptorW", QByteArray(fgd))
+                mimedata.setData("FileContents", QByteArray(file_bytes))
+            except Exception as e:
+                pass
         else:
             mimedata.setText(content)
             mimedata.setHtml(f"<html><body>{content}</body></html>")
@@ -922,6 +937,7 @@ class ItemCard(QFrame):
         pixmap = self.grab()
         drag.setPixmap(pixmap)
         drag.setHotSpot(event.pos())
+        shelf = self.window()
         shelf.is_dragging = True
         shelf.active_drag_is_top_level = True
         
@@ -929,29 +945,6 @@ class ItemCard(QFrame):
         
         shelf.is_dragging = False
         shelf.active_drag_is_top_level = False
-        
-        if self.item.get("type") == "image" and bool(QApplication.keyboardModifiers() & Qt.KeyboardModifier.ShiftModifier):
-            from PyQt6.QtGui import QCursor
-            cursor_pos = QCursor.pos()
-            # If dropped outside Py-Drop window
-            if not shelf.geometry().contains(cursor_pos):
-                import ctypes
-                import threading
-                import time
-                # Check if left mouse button is released (high bit not set)
-                if not (ctypes.windll.user32.GetAsyncKeyState(0x01) & 0x8000):
-                    def do_paste():
-                        # Wait for drop resolution and target window focus
-                        time.sleep(0.15)
-                        VK_CONTROL = 0x11
-                        VK_V = 0x56
-                        KEYEVENTF_KEYUP = 0x0002
-                        ctypes.windll.user32.keybd_event(VK_CONTROL, 0, 0, 0)
-                        ctypes.windll.user32.keybd_event(VK_V, 0, 0, 0)
-                        ctypes.windll.user32.keybd_event(VK_V, 0, KEYEVENTF_KEYUP, 0)
-                        ctypes.windll.user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
-                    threading.Thread(target=do_paste, daemon=True).start()
-
         shelf._check_close()
         self.check_validity()
         

@@ -63,6 +63,10 @@ class ClipboardWatcher(QObject):
                     img = QImage(text)
                     if not img.isNull():
                         mime.setImageData(img)
+                        import hashlib
+                        ptr = img.constBits()
+                        ptr.setsize(img.sizeInBytes())
+                        self.last_content = hashlib.md5(ptr.asstring()).hexdigest()
             else:
                 mime.setText(text)
             
@@ -70,12 +74,13 @@ class ClipboardWatcher(QObject):
         clipboard.setMimeData(mime)
         
         # Normalize for last_content comparison to avoid duplicates from slash mismatch
-        if isinstance(text, list):
-            self.last_content = [os.path.normcase(os.path.normpath(p)) for p in text]
-        elif os.path.exists(text):
-            self.last_content = os.path.normcase(os.path.normpath(text))
-        else:
-            self.last_content = text
+        if item_type != "image":
+            if isinstance(text, list):
+                self.last_content = [os.path.normcase(os.path.normpath(p)) for p in text]
+            elif os.path.exists(text):
+                self.last_content = os.path.normcase(os.path.normpath(text))
+            else:
+                self.last_content = text
             
         clipboard.blockSignals(False)
         
