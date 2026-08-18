@@ -58,6 +58,11 @@ class ClipboardWatcher(QObject):
             text = text.strip()
             if os.path.exists(text):
                 mime.setUrls([QUrl.fromLocalFile(text)])
+                if item_type == "image":
+                    from PyQt6.QtGui import QImage
+                    img = QImage(text)
+                    if not img.isNull():
+                        mime.setImageData(img)
             else:
                 mime.setText(text)
             

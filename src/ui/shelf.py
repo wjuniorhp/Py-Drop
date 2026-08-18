@@ -422,6 +422,9 @@ class ItemCard(QFrame):
         self.accent_color = accent_color
         self.drag_start_position = QPoint()
         
+        # Prevent long strings without spaces (like temp image paths) from expanding the card horizontally
+        self.setMaximumWidth(self.shelf_width - 28)
+        
         self.setFrameShape(QFrame.Shape.StyledPanel)
         self.setObjectName("ItemCard")
         self.setStyleSheet("""
@@ -891,6 +894,10 @@ class ItemCard(QFrame):
         elif self.item.get("type") == "image" and os.path.exists(content):
             url = QUrl.fromLocalFile(content)
             mimedata.setUrls([url])
+            from PyQt6.QtGui import QImage
+            img = QImage(content)
+            if not img.isNull():
+                mimedata.setImageData(img)
         else:
             mimedata.setText(content)
             mimedata.setHtml(f"<html><body>{content}</body></html>")
