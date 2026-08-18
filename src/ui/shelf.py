@@ -894,19 +894,14 @@ class ItemCard(QFrame):
         elif self.item.get("type") == "image" and os.path.exists(content):
             from PyQt6.QtGui import QImage
             img = QImage(content)
-            
-            is_shift_pressed = bool(QApplication.keyboardModifiers() & Qt.KeyboardModifier.ShiftModifier)
-            
-            if not is_shift_pressed:
-                url = QUrl.fromLocalFile(content)
-                mimedata.setUrls([url])
                 
             if not img.isNull():
                 mimedata.setImageData(img)
                 
-            # Adiciona formato de Arquivo Virtual (FileGroupDescriptorW)
-            # Ao arrastar com SHIFT, não mandamos URL. O Teams vai ler o Arquivo Virtual na memória.
-            # Como arquivos virtuais não têm caminho de disco (são bytes na RAM), não ativam o DLP!
+            # Formato de Arquivo Virtual (FileGroupDescriptorW) nativo
+            # Ao NÃO enviarmos a URL (CF_HDROP), obrigamos os programas a lerem o arquivo
+            # virtual da RAM. Isso fura o bloqueio DLP do Teams (que verifica URLs de disco)
+            # e continua funcionando no Windows Explorer, que aceita arquivos virtuais!
             import struct
             filename = os.path.basename(content)
             if not filename.lower().endswith('.png'):
