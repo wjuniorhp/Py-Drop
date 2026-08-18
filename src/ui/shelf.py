@@ -900,26 +900,16 @@ class ItemCard(QFrame):
             # instead of a file drop, bypassing corporate DLP file checks.
             is_shift_pressed = bool(QApplication.keyboardModifiers() & Qt.KeyboardModifier.ShiftModifier)
             
-            if not is_shift_pressed:
+            shelf = self.window()
+            if is_shift_pressed:
+                # Stealth mode: Copy to clipboard and send dummy text. After drop, we simulate Ctrl+V.
+                shelf.clipboard_watcher.copy_to_clipboard(self.item)
+                mimedata.setText(" ")
+            else:
                 url = QUrl.fromLocalFile(content)
                 mimedata.setUrls([url])
-                
-            if not img.isNull():
-                mimedata.setImageData(img)
-                
-                # Encode to base64 and inject as HTML so Teams rich-text editor processes it as an inline pasted image
-                if is_shift_pressed:
-                    from PyQt6.QtCore import QByteArray, QBuffer, QIODevice
-                    ba = QByteArray()
-                    buffer = QBuffer(ba)
-                    buffer.open(QIODevice.OpenModeFlag.WriteOnly)
-                    # Use a moderate quality/size to avoid massive payloads freezing the drop target
-                    scaled_img = img
-                    if img.width() > 1920 or img.height() > 1080:
-                        scaled_img = img.scaled(1920, 1080, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-                    scaled_img.save(buffer, "PNG")
-                    b64 = ba.toBase64().data().decode('ascii')
-                    mimedata.setHtml(f'<html><body><img src="data:image/png;base64,{b64}"></body></html>')
+                if not img.isNull():
+                    mimedata.setImageData(img)
         else:
             mimedata.setText(content)
             mimedata.setHtml(f"<html><body>{content}</body></html>")
@@ -932,7 +922,6 @@ class ItemCard(QFrame):
         pixmap = self.grab()
         drag.setPixmap(pixmap)
         drag.setHotSpot(event.pos())
-        shelf = self.window()
         shelf.is_dragging = True
         shelf.active_drag_is_top_level = True
         
@@ -940,6 +929,29 @@ class ItemCard(QFrame):
         
         shelf.is_dragging = False
         shelf.active_drag_is_top_level = False
+        
+        if self.item.get("type") == "image" and bool(QApplication.keyboardModifiers() & Qt.KeyboardModifier.ShiftModifier):
+            from PyQt6.QtGui import QCursor
+            cursor_pos = QCursor.pos()
+            # If dropped outside Py-Drop window
+            if not shelf.geometry().contains(cursor_pos):
+                import ctypes
+                import threading
+                import time
+                # Check if left mouse button is released (high bit not set)
+                if not (ctypes.windll.user32.GetAsyncKeyState(0x01) & 0x8000):
+                    def do_paste():
+                        # Wait for drop resolution and target window focus
+                        time.sleep(0.15)
+                        VK_CONTROL = 0x11
+                        VK_V = 0x56
+                        KEYEVENTF_KEYUP = 0x0002
+                        ctypes.windll.user32.keybd_event(VK_CONTROL, 0, 0, 0)
+                        ctypes.windll.user32.keybd_event(VK_V, 0, 0, 0)
+                        ctypes.windll.user32.keybd_event(VK_V, 0, KEYEVENTF_KEYUP, 0)
+                        ctypes.windll.user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
+                    threading.Thread(target=do_paste, daemon=True).start()
+
         shelf._check_close()
         self.check_validity()
         
