@@ -151,6 +151,14 @@ class ClipboardWatcher(QObject):
             img = mime.imageData()
             # Ignora imagens muito pequenas (como imagens transparentes 1x1 colocadas por alguns editores de texto na área de transferência)
             if img and not img.isNull() and img.width() > 5 and img.height() > 5:
+                import hashlib
+                ptr = img.constBits()
+                ptr.setsize(img.sizeInBytes())
+                img_hash = hashlib.md5(ptr.asstring()).hexdigest()
+                if img_hash == self.last_content:
+                    return
+                self.last_content = img_hash
+                
                 saved_path = self.save_image_from_mime(mime)
                 if saved_path:
                     self.add_from_image(saved_path)
