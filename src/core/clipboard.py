@@ -13,6 +13,29 @@ class ClipboardWatcher(QObject):
         self.storage = storage
         self.audio = audio
         self.history = self.storage.load()
+        
+        # Corrige caminhos absolutos de imagens internas caso o projeto tenha sido movido ou rodado de outro drive (ex: Y:)
+        images_dir = self.storage.filepath.parent / "images"
+        changed = False
+        for item in self.history:
+            content = item.get("content")
+            if isinstance(content, str) and "data" in content and "images" in content and "image_" in content:
+                filename = os.path.basename(content.replace("\\", "/"))
+                new_path = str(images_dir / filename)
+                if new_path != content:
+                    item["content"] = new_path
+                    changed = True
+            elif isinstance(content, list):
+                for i, path in enumerate(content):
+                    if isinstance(path, str) and "data" in path and "images" in path and "image_" in path:
+                        filename = os.path.basename(path.replace("\\", "/"))
+                        new_path = str(images_dir / filename)
+                        if new_path != path:
+                            content[i] = new_path
+                            changed = True
+        if changed:
+            self.storage.save(self.history)
+            
         self.is_paused = False
         self.last_content = ""
         
@@ -63,10 +86,6 @@ class ClipboardWatcher(QObject):
                     img = QImage(text)
                     if not img.isNull():
                         mime.setImageData(img)
-                        import hashlib
-                        ptr = img.constBits()
-                        ptr.setsize(img.sizeInBytes())
-                        self.last_content = hashlib.md5(ptr.asstring()).hexdigest()
             else:
                 mime.setText(text)
             
@@ -74,13 +93,12 @@ class ClipboardWatcher(QObject):
         clipboard.setMimeData(mime)
         
         # Normalize for last_content comparison to avoid duplicates from slash mismatch
-        if item_type != "image":
-            if isinstance(text, list):
-                self.last_content = [os.path.normcase(os.path.normpath(p)) for p in text]
-            elif os.path.exists(text):
-                self.last_content = os.path.normcase(os.path.normpath(text))
-            else:
-                self.last_content = text
+        if isinstance(text, list):
+            self.last_content = [os.path.normcase(os.path.normpath(p)) for p in text]
+        elif os.path.exists(text):
+            self.last_content = os.path.normcase(os.path.normpath(text))
+        else:
+            self.last_content = text
             
         clipboard.blockSignals(False)
         
@@ -90,7 +108,7 @@ class ClipboardWatcher(QObject):
             elif item_type == "files" or isinstance(text, list):
                 self.add_from_files(text)
             else:
-                self.add_from_text(text)
+                self.add_from_text(text, force_type=item_type)
 
     def _on_clipboard_change(self):
         # On Windows, the clipboard might be locked by the source application for a few milliseconds,
@@ -118,18 +136,21 @@ class ClipboardWatcher(QObject):
         
         current_text = ""
         current_list = None
+        current_type = None
+        
+        # Ignora imagens geradas pelo próprio Py-Drop sendo copiadas (evita duplicações)
+        if mime.hasUrls() and mime.urls():
+            local_files = [u.toLocalFile() for u in mime.urls() if u.isLocalFile()]
+            if len(local_files) == 1:
+                path_str = local_files[0].replace('\\', '/')
+                if "/images/image_" in path_str and path_str.endswith(".png"):
+                    self.last_content = os.path.normcase(os.path.normpath(local_files[0]))
+                    return
         
         if mime.hasImage():
             img = mime.imageData()
-            if img and not img.isNull():
-                import hashlib
-                ptr = img.constBits()
-                ptr.setsize(img.sizeInBytes())
-                img_hash = hashlib.md5(ptr.asstring()).hexdigest()
-                if img_hash == self.last_content:
-                    return
-                self.last_content = img_hash
-                
+            # Ignora imagens muito pequenas (como imagens transparentes 1x1 colocadas por alguns editores de texto na área de transferência)
+            if img and not img.isNull() and img.width() > 5 and img.height() > 5:
                 saved_path = self.save_image_from_mime(mime)
                 if saved_path:
                     self.add_from_image(saved_path)
@@ -140,15 +161,17 @@ class ClipboardWatcher(QObject):
             if local_files:
                 if len(local_files) == 1:
                     current_text = local_files[0]
+                    current_type = "file"
                 else:
                     current_list = local_files
         
         if not current_list and not current_text:
-            if not current_text:
-                if mime.hasText():
-                    current_text = mime.text()
-                elif mime.hasUrls() and mime.urls():
-                    current_text = mime.urls()[0].toString()
+            if mime.hasText():
+                current_text = mime.text().strip()
+                current_type = "text"
+            elif mime.hasUrls() and mime.urls():
+                current_text = mime.urls()[0].toString()
+                current_type = "text"
             
         if current_list:
             norm_list = [os.path.normcase(os.path.normpath(p)) for p in current_list]
@@ -157,11 +180,11 @@ class ClipboardWatcher(QObject):
             self.last_content = norm_list
             self.add_from_files(current_list)
         else:
-            norm_text = os.path.normcase(os.path.normpath(current_text)) if os.path.exists(current_text) else current_text
+            norm_text = os.path.normcase(os.path.normpath(current_text)) if (current_type == "file" or os.path.exists(current_text)) else current_text
             if not current_text or norm_text == self.last_content:
                 return
             self.last_content = norm_text
-            self.add_from_text(current_text)
+            self.add_from_text(current_text, force_type=current_type)
             
     def add_from_image(self, saved_path):
         item = {
@@ -175,13 +198,17 @@ class ClipboardWatcher(QObject):
         if self.audio:
             self.audio.play_copy()
         
-    def add_from_text(self, current_text):
-        item_type = "text"
-        
-        if os.path.exists(current_text):
-            item_type = "file"
-        elif re.match(r'^https?://', current_text) or re.match(r'^www\.', current_text):
-            item_type = "link"
+    def add_from_text(self, current_text, force_type=None):
+        if force_type:
+            item_type = force_type
+            if force_type == "text" and (re.match(r'^https?://', current_text) or re.match(r'^www\.', current_text)):
+                item_type = "link"
+        else:
+            item_type = "text"
+            if os.path.exists(current_text):
+                item_type = "file"
+            elif re.match(r'^https?://', current_text) or re.match(r'^www\.', current_text):
+                item_type = "link"
             
         item = {
             "id": str(time.time()),

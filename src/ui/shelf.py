@@ -169,8 +169,105 @@ def _format_size(size):
         size /= 1024.0
     return f'{size:.1f} TB'
 
+class ImagePreviewWindow(QWidget):
+    _active_windows = []
+
+    def __init__(self, image_path, source_rect, parent=None):
+        super().__init__(None)
+        ImagePreviewWindow._active_windows.append(self)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.WindowTransparentForInput)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        
+        from PyQt6.QtGui import QPixmap, QGuiApplication
+        from PyQt6.QtCore import QRect, QPropertyAnimation, QEasingCurve
+        
+        self.image_path = image_path
+        self.source_rect = source_rect
+        
+        screen = QGuiApplication.screenAt(source_rect.center())
+        if not screen:
+            screen = QGuiApplication.primaryScreen()
+            
+        screen_geom = screen.geometry()
+        self.setGeometry(screen_geom)
+        
+        local_source = QRect(
+            source_rect.x() - screen_geom.x(),
+            source_rect.y() - screen_geom.y(),
+            source_rect.width(),
+            source_rect.height()
+        )
+        self.local_source = local_source
+        
+        self.pixmap = QPixmap(image_path)
+        
+        target_width = source_rect.width() * 5
+        target_height = source_rect.height() * 5
+        
+        self.pixmap = self.pixmap.scaled(target_width, target_height, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        target_width = self.pixmap.width()
+        target_height = self.pixmap.height()
+        
+        target_x = local_source.left() - target_width - 20
+        if target_x < 0:
+            target_x = local_source.right() + 20
+            
+        target_y = local_source.top() - (target_height - local_source.height()) // 2
+        if target_y < 20: target_y = 20
+        if target_y + target_height > screen_geom.height() - 20:
+            target_y = screen_geom.height() - target_height - 20
+            
+        self.local_target = QRect(target_x, target_y, target_width, target_height)
+        
+        self.lbl = QLabel(self)
+        self.lbl.setScaledContents(True)
+        self.lbl.setPixmap(self.pixmap)
+        self.lbl.setGeometry(self.local_source)
+        self.lbl.setStyleSheet("""
+            QLabel {
+                border-radius: 8px;
+                border: 2px solid rgba(255, 255, 255, 50);
+                background-color: rgba(26, 26, 26, 250);
+            }
+        """)
+        
+        self.anim = QPropertyAnimation(self.lbl, b"geometry")
+        self.anim.setDuration(250)
+        self.anim.setEasingCurve(QEasingCurve.Type.OutBack)
+        self.anim.setStartValue(self.local_source)
+        self.anim.setEndValue(self.local_target)
+        
+        self.is_closing = False
+        
+    def showEvent(self, event):
+        self.anim.start()
+        super().showEvent(event)
+
+    def close_animated(self):
+        if self.is_closing: return
+        self.is_closing = True
+        from PyQt6.QtCore import QEasingCurve
+        self.anim.setEasingCurve(QEasingCurve.Type.InCubic)
+        self.anim.setStartValue(self.lbl.geometry())
+        self.anim.setEndValue(self.local_source)
+        
+        def on_finished():
+            self.close()
+            if self in ImagePreviewWindow._active_windows:
+                ImagePreviewWindow._active_windows.remove(self)
+                
+        self.anim.finished.connect(on_finished)
+        self.anim.start()
+
+    @classmethod
+    def close_all(cls):
+        for w in list(cls._active_windows):
+            if not w.is_closing:
+                w.close_animated()
+
 class SubItemWidget(QFrame):
     copy_clicked = pyqtSignal(str)
+    delete_clicked = pyqtSignal(str)
     
     def get_darker(self, hex_color):
         from PyQt6.QtGui import QColor
@@ -250,6 +347,9 @@ class SubItemWidget(QFrame):
         layout.addLayout(v_layout)
         layout.addStretch()
         
+        self.actions_layout = QHBoxLayout()
+        self.actions_layout.setSpacing(5)
+        
         dir_btn = SvgButton(PATH_FOLDER, size=12, color="#666666", hover_color="#ffffff")
         dir_btn.setToolTip("Abrir pasta")
         def open_dir():
@@ -257,7 +357,31 @@ class SubItemWidget(QFrame):
                 if os.path.isdir(self.file_path): os.startfile(self.file_path)
                 else: os.startfile(os.path.dirname(self.file_path))
         dir_btn.clicked.connect(open_dir)
-        layout.addWidget(dir_btn)
+        self.actions_layout.addWidget(dir_btn)
+        
+        del_btn = SvgButton(PATH_X, size=12, color="#666666", hover_color="#ff4444")
+        del_btn.setToolTip("Remover item")
+        def on_del():
+            if self.audio: self.audio.play_delete()
+            self.delete_clicked.emit(self.file_path)
+        del_btn.clicked.connect(on_del)
+        self.actions_layout.addWidget(del_btn)
+        
+        layout.addLayout(self.actions_layout)
+        self.actions_widget = QWidget()
+        self.actions_widget.setLayout(self.actions_layout)
+        self.actions_widget.setParent(self)
+        layout.addWidget(self.actions_widget)
+        
+        self.actions_widget.hide()
+
+    def enterEvent(self, event):
+        self.actions_widget.show()
+        super().enterEvent(event)
+        
+    def leaveEvent(self, event):
+        self.actions_widget.hide()
+        super().leaveEvent(event)
         
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -283,8 +407,17 @@ class SubItemWidget(QFrame):
         drag.setMimeData(mimedata)
         
         # Add visual preview of the dragged item
-        pixmap = self.grab()
-        drag.setPixmap(pixmap)
+        original_pixmap = self.grab()
+        from PyQt6.QtGui import QPixmap, QPainter
+        transparent_pixmap = QPixmap(original_pixmap.size())
+        transparent_pixmap.fill(Qt.GlobalColor.transparent)
+        
+        painter = QPainter(transparent_pixmap)
+        painter.setOpacity(0.6)  # 60% opacity
+        painter.drawPixmap(0, 0, original_pixmap)
+        painter.end()
+        
+        drag.setPixmap(transparent_pixmap)
         drag.setHotSpot(event.pos())
         shelf = self.window()
         shelf.is_dragging = True
@@ -293,7 +426,7 @@ class SubItemWidget(QFrame):
         if hasattr(self, 'parent_id') and self.parent_id:
             shelf.active_drag_source_id = self.parent_id
             
-        drag.exec(Qt.DropAction.CopyAction | Qt.DropAction.MoveAction, Qt.DropAction.CopyAction)
+        drag.exec(Qt.DropAction.CopyAction)
         
         shelf.is_dragging = False
         shelf.active_drag_source_id = None
@@ -318,6 +451,20 @@ class SubItemWidget(QFrame):
                 """))
                 self.copy_clicked.emit(self.file_path)
                 event.accept()
+                return
+        elif event.button() == Qt.MouseButton.RightButton:
+            ext = os.path.splitext(self.file_path)[1].lower()
+            if ext in ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'] and os.path.exists(self.file_path):
+                if hasattr(self, 'preview_window') and self.preview_window is not None and not getattr(self.preview_window, 'is_closing', False):
+                    self.preview_window.close_animated()
+                    self.preview_window = None
+                else:
+                    ImagePreviewWindow.close_all()
+                    from PyQt6.QtCore import QRect, QPoint
+                    source_rect = QRect(self.mapToGlobal(QPoint(0,0)), self.size())
+                    self.preview_window = ImagePreviewWindow(self.file_path, source_rect)
+                    self.preview_window.show()
+                if self.audio: self.audio.play_toggle()
                 return
         super().mouseReleaseEvent(event)
 import colorsys
@@ -496,6 +643,17 @@ class ItemCard(QFrame):
                 else: os.startfile(os.path.dirname(path))
             act_btn.clicked.connect(open_dir)
             header.addWidget(act_btn)
+        elif item_type == "text":
+            text_content = str(content).strip()
+            if os.path.exists(text_content):
+                act_btn = SvgButton(PATH_FOLDER, size=14, color="#888888")
+                act_btn.setToolTip("Abrir pasta")
+                def open_text_dir():
+                    path = self.item.get("content").strip()
+                    if os.path.isdir(path): os.startfile(path)
+                    else: os.startfile(os.path.dirname(path))
+                act_btn.clicked.connect(open_text_dir)
+                header.addWidget(act_btn)
         elif item_type == "files":
             files = self.item.get("content", [])
             if files:
@@ -571,13 +729,15 @@ class ItemCard(QFrame):
             img_vlayout = QVBoxLayout()
             from PyQt6.QtGui import QPixmap
             img = QPixmap(content)
+            self.icon_widget = InvalidableLabel()
             if not img.isNull():
-                self.icon_widget = InvalidableLabel()
                 pixmap = img.scaled(self.shelf_width - 80, 120, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
                 self.icon_widget.setPixmap(pixmap)
-                self.icon_widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                self.icon_widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-                img_vlayout.addWidget(self.icon_widget)
+            else:
+                self.icon_widget.setFixedSize(self.shelf_width - 80, 120)
+            self.icon_widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.icon_widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            img_vlayout.addWidget(self.icon_widget)
             content_layout.addLayout(img_vlayout)
         elif item_type == "files":
             files_vlayout = QVBoxLayout()
@@ -655,15 +815,6 @@ class ItemCard(QFrame):
             self.expand_anim.setDuration(250)
             self.expand_anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
             
-            self.summary_anim = QPropertyAnimation(self.summary_body_widget, b"maximumHeight")
-            self.summary_anim.setDuration(250)
-            self.summary_anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
-            
-            from PyQt6.QtCore import QParallelAnimationGroup
-            self.anim_group = QParallelAnimationGroup(self)
-            self.anim_group.addAnimation(self.expand_anim)
-            self.anim_group.addAnimation(self.summary_anim)
-            
             files_vlayout.addWidget(self.expanded_widget)
             content_layout.addLayout(files_vlayout)
         else:
@@ -716,15 +867,6 @@ class ItemCard(QFrame):
                 self.expand_anim.setDuration(250)
                 self.expand_anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
                 
-                self.summary_anim = QPropertyAnimation(self.summary_body_widget, b"maximumHeight")
-                self.summary_anim.setDuration(250)
-                self.summary_anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
-                
-                from PyQt6.QtCore import QParallelAnimationGroup
-                self.anim_group = QParallelAnimationGroup(self)
-                self.anim_group.addAnimation(self.expand_anim)
-                self.anim_group.addAnimation(self.summary_anim)
-                
                 text_vlayout.addWidget(self.summary_body_widget)
                 text_vlayout.addWidget(self.expanded_widget)
                 content_layout.addLayout(text_vlayout)
@@ -751,6 +893,12 @@ class ItemCard(QFrame):
                 if hasattr(self, 'icon_widget'): self.icon_widget.set_invalid(True)
             else:
                 if hasattr(self, 'lbl'): self.lbl.setStyleSheet("color: #ffffff; font-size: 14px; font-weight: bold; background: transparent; text-decoration: none;")
+                if hasattr(self, 'icon_widget'): self.icon_widget.set_invalid(False)
+        elif item_type == "image":
+            if not os.path.exists(content):
+                self.is_invalid = True
+                if hasattr(self, 'icon_widget'): self.icon_widget.set_invalid(True)
+            else:
                 if hasattr(self, 'icon_widget'): self.icon_widget.set_invalid(False)
         elif item_type == "files":
             missing = any(not os.path.exists(p) for p in content)
@@ -865,6 +1013,8 @@ class ItemCard(QFrame):
                 
         if source_data and self._is_valid_grouping(event):
             shelf.clipboard_watcher.stack_items(self.item_id, source_data, source_id, is_internal)
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(0, shelf.load_history)
             event.acceptProposedAction()
         else:
             event.ignore()
@@ -899,9 +1049,6 @@ class ItemCard(QFrame):
                 mimedata.setImageData(img)
                 
             # Formato de Arquivo Virtual (FileGroupDescriptorW) nativo
-            # Ao NÃO enviarmos a URL (CF_HDROP), obrigamos os programas a lerem o arquivo
-            # virtual da RAM. Isso fura o bloqueio DLP do Teams (que verifica URLs de disco)
-            # e continua funcionando no Windows Explorer, que aceita arquivos virtuais!
             import struct
             filename = os.path.basename(content)
             if not filename.lower().endswith('.png'):
@@ -929,17 +1076,28 @@ class ItemCard(QFrame):
         mimedata.setData("edgedrop/internal-drag-item", QByteArray(self.item_id.encode('utf-8')))
         
         # Add visual preview of the dragged card
-        pixmap = self.grab()
-        drag.setPixmap(pixmap)
+        original_pixmap = self.grab()
+        from PyQt6.QtGui import QPixmap, QPainter
+        transparent_pixmap = QPixmap(original_pixmap.size())
+        transparent_pixmap.fill(Qt.GlobalColor.transparent)
+        
+        painter = QPainter(transparent_pixmap)
+        painter.setOpacity(0.6)  # 60% opacity
+        painter.drawPixmap(0, 0, original_pixmap)
+        painter.end()
+        
+        drag.setPixmap(transparent_pixmap)
         drag.setHotSpot(event.pos())
         shelf = self.window()
         shelf.is_dragging = True
         shelf.active_drag_is_top_level = True
+        shelf.active_drag_source_id = self.item_id
         
-        drag.exec(Qt.DropAction.CopyAction | Qt.DropAction.MoveAction, Qt.DropAction.CopyAction)
+        drag.exec(Qt.DropAction.CopyAction)
         
         shelf.is_dragging = False
         shelf.active_drag_is_top_level = False
+        shelf.active_drag_source_id = None
         shelf._check_close()
         self.check_validity()
         
@@ -962,48 +1120,55 @@ class ItemCard(QFrame):
                     }
                 """))
         elif event.button() == Qt.MouseButton.RightButton:
+            if self.item.get("type") == "image":
+                content = self.item.get("content")
+                if os.path.exists(content):
+                    if hasattr(self, 'preview_window') and self.preview_window is not None and not getattr(self.preview_window, 'is_closing', False):
+                        self.preview_window.close_animated()
+                        self.preview_window = None
+                    else:
+                        ImagePreviewWindow.close_all()
+                        from PyQt6.QtCore import QRect, QPoint
+                        source_rect = QRect(self.mapToGlobal(QPoint(0,0)), self.size())
+                        self.preview_window = ImagePreviewWindow(content, source_rect)
+                        self.preview_window.show()
+                    if self.audio: self.audio.play_toggle()
+                    return
+                    
             if hasattr(self, 'expanded_widget'):
                 is_expanded = self.expanded_widget.maximumHeight() > 0
                 
                 if not is_expanded:
-                    self.expanded_widget.setVisible(True)
-                    # We need the full heights to animate to/from
-                    exp_target = self.expanded_widget.sizeHint().height()
                     sum_target = self.summary_body_widget.sizeHint().height()
+                    self.summary_body_widget.setVisible(False)
+                    self.expanded_widget.setVisible(True)
+                    exp_target = self.expanded_widget.sizeHint().height()
                     
-                    self.expand_anim.setStartValue(0)
+                    self.expand_anim.setStartValue(sum_target)
                     self.expand_anim.setEndValue(exp_target)
                     
-                    self.summary_anim.setStartValue(sum_target)
-                    self.summary_anim.setEndValue(0)
-                    
-                    self.anim_group.start()
+                    self.expand_anim.start()
                     
                     def on_expand_finish():
-                        try: self.anim_group.finished.disconnect(on_expand_finish)
+                        try: self.expand_anim.finished.disconnect(on_expand_finish)
                         except: pass
-                        self.summary_body_widget.setVisible(False)
                         self.expanded_widget.setMaximumHeight(16777215)
-                    self.anim_group.finished.connect(on_expand_finish)
+                    self.expand_anim.finished.connect(on_expand_finish)
                     
                 else:
                     exp_target = self.expanded_widget.sizeHint().height()
                     sum_target = self.summary_body_widget.sizeHint().height()
                     
                     self.expand_anim.setStartValue(exp_target)
-                    self.expand_anim.setEndValue(0)
-                    
-                    self.summary_body_widget.setVisible(True)
-                    self.summary_anim.setStartValue(0)
-                    self.summary_anim.setEndValue(sum_target)
+                    self.expand_anim.setEndValue(sum_target)
                     
                     def on_finish():
-                        try: self.anim_group.finished.disconnect(on_finish)
+                        try: self.expand_anim.finished.disconnect(on_finish)
                         except: pass
                         self.expanded_widget.setVisible(False)
-                        self.summary_body_widget.setMaximumHeight(16777215)
-                    self.anim_group.finished.connect(on_finish)
-                    self.anim_group.start()
+                        self.summary_body_widget.setVisible(True)
+                    self.expand_anim.finished.connect(on_finish)
+                    self.expand_anim.start()
                     
                 if self.audio: self.audio.play_toggle()
         super().mouseReleaseEvent(event)
@@ -1625,6 +1790,10 @@ class EdgeDropShelf(QWidget):
     def close_shelf(self):
         if self.is_open:
             self.is_open = False
+            try:
+                ImagePreviewWindow.close_all()
+            except NameError:
+                pass
             self.animation.setStartValue(self.pos())
             self.animation.setEndValue(QPoint(self.x_hidden, self.y_pos))
             self.animation.start()
@@ -1786,7 +1955,7 @@ class EdgeDropShelf(QWidget):
                     self.clipboard_watcher.remove_file_from_group(parent_id, local_files[0])
                     # Add as new top-level item
                     self.clipboard_watcher.copy_to_clipboard(local_files[0], add_to_shelf=True)
-                    self.load_history() # Force UI refresh
+                    QTimer.singleShot(0, self.load_history)
                     event.acceptProposedAction()
                     return
                     
