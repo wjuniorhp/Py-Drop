@@ -36,6 +36,26 @@ class ClipboardWatcher(QObject):
         if changed:
             self.storage.save(self.history)
             
+        # Cleanup orphaned images that might have been left behind due to previous bugs
+        if images_dir.exists():
+            active_paths = set()
+            for item in self.history:
+                content = item.get("content")
+                if item.get("type") == "image" and isinstance(content, str):
+                    active_paths.add(os.path.normcase(os.path.normpath(content)))
+                elif item.get("type") == "files" and isinstance(content, list):
+                    for p in content:
+                        if isinstance(p, str):
+                            active_paths.add(os.path.normcase(os.path.normpath(p)))
+            
+            for f in images_dir.glob("image_*.png"):
+                norm_f = os.path.normcase(os.path.normpath(str(f)))
+                if norm_f not in active_paths:
+                    try:
+                        os.remove(f)
+                    except Exception:
+                        pass
+            
         self.is_paused = False
         self.last_content = ""
         
@@ -278,6 +298,13 @@ class ClipboardWatcher(QObject):
                 content = x.get("content", [])
                 if file_path in content:
                     content.remove(file_path)
+                    # Check if it was an internal image and delete it
+                    path_str = str(file_path).replace('\\', '/')
+                    if os.path.exists(file_path) and "/images/image_" in path_str and path_str.endswith(".png"):
+                        try:
+                            os.remove(file_path)
+                        except Exception:
+                            pass
                 if len(content) == 1:
                     x["type"] = "file"
                     x["content"] = content[0]
@@ -334,9 +361,19 @@ class ClipboardWatcher(QObject):
         self.storage.save(self.history)
         
     def _delete_physical_file(self, item):
+        paths_to_check = []
         if item.get("type") == "image":
-            path = item.get("content")
-            if path and os.path.exists(path) and "data" in path and "images" in path:
+            paths_to_check.append(item.get("content"))
+        elif item.get("type") == "files":
+            content = item.get("content")
+            if isinstance(content, list):
+                paths_to_check.extend(content)
+                
+        for path in paths_to_check:
+            if not path:
+                continue
+            path_str = str(path).replace('\\', '/')
+            if os.path.exists(path) and "/images/image_" in path_str and path_str.endswith(".png"):
                 try:
                     os.remove(path)
                 except Exception:

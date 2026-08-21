@@ -347,7 +347,9 @@ class SubItemWidget(QFrame):
         layout.addLayout(v_layout)
         layout.addStretch()
         
-        self.actions_layout = QHBoxLayout()
+        self.actions_widget = QWidget(self)
+        self.actions_layout = QHBoxLayout(self.actions_widget)
+        self.actions_layout.setContentsMargins(0, 0, 0, 0)
         self.actions_layout.setSpacing(5)
         
         dir_btn = SvgButton(PATH_FOLDER, size=12, color="#666666", hover_color="#ffffff")
@@ -367,10 +369,6 @@ class SubItemWidget(QFrame):
         del_btn.clicked.connect(on_del)
         self.actions_layout.addWidget(del_btn)
         
-        layout.addLayout(self.actions_layout)
-        self.actions_widget = QWidget()
-        self.actions_widget.setLayout(self.actions_layout)
-        self.actions_widget.setParent(self)
         layout.addWidget(self.actions_widget)
         
         self.actions_widget.hide()
@@ -554,6 +552,7 @@ class ItemCard(QFrame):
     delete_clicked = pyqtSignal(str)
     pin_clicked = pyqtSignal(str)
     copy_clicked = pyqtSignal(object)
+    delete_subitem_clicked = pyqtSignal(str, str)
 
     def get_darker(self, hex_color):
         from PyQt6.QtGui import QColor
@@ -808,6 +807,7 @@ class ItemCard(QFrame):
             for path in content:
                 sub_item = SubItemWidget(path, parent_id=self.item.get("id"), audio=self.audio, accent_color=self.accent_color)
                 sub_item.copy_clicked.connect(self._on_subitem_copy)
+                sub_item.delete_clicked.connect(self._on_subitem_delete)
                 expanded_layout.addWidget(sub_item)
             self.expanded_widget.setMaximumHeight(0)
             self.expanded_widget.setVisible(False)
@@ -881,6 +881,9 @@ class ItemCard(QFrame):
 
     def _on_subitem_copy(self, path):
         self.copy_clicked.emit({"type": "file", "content": path})
+
+    def _on_subitem_delete(self, path):
+        self.delete_subitem_clicked.emit(self.item_id, path)
 
     def check_validity(self):
         item_type = self.item.get("type", "text")
@@ -1696,7 +1699,7 @@ class EdgeDropShelf(QWidget):
             self.is_capturing = False
             
             if self.hotkey_manager:
-                from hotkey import parse_hotkey_string
+                from src.core.hotkey import parse_hotkey_string
                 modifiers, vk = parse_hotkey_string(hk_str)
                 if vk != 0:
                     self.hotkey_manager.start_hotkey(modifiers, vk)
@@ -1820,6 +1823,11 @@ class EdgeDropShelf(QWidget):
         else:
             self.empty_lbl.hide()
 
+    def delete_subitem(self, group_id, file_path):
+        if self.audio: self.audio.play_delete()
+        self.clipboard_watcher.remove_file_from_group(group_id, file_path)
+        self.load_history()
+
     def add_clipboard_item(self, item, to_top=True):
         self.empty_lbl.hide()
         item_id = item.get("id")
@@ -1832,6 +1840,7 @@ class EdgeDropShelf(QWidget):
         card = ItemCard(item, self.shelf_width, self.audio, accent_color=self.accent_color)
         card.copy_clicked.connect(self.clipboard_watcher.copy_to_clipboard)
         card.delete_clicked.connect(self.delete_item)
+        card.delete_subitem_clicked.connect(self.delete_subitem)
         card.pin_clicked.connect(self.pin_item)
         
         if item.get("pinned"):
