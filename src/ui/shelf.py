@@ -424,8 +424,14 @@ class SubItemWidget(QFrame):
         if hasattr(self, 'parent_id') and self.parent_id:
             shelf.active_drag_source_id = self.parent_id
             
+        if hasattr(shelf, 'start_auto_scroll'):
+            shelf.start_auto_scroll()
+            
         drag.exec(Qt.DropAction.CopyAction)
         
+        if hasattr(shelf, 'stop_auto_scroll'):
+            shelf.stop_auto_scroll()
+            
         shelf.is_dragging = False
         shelf.active_drag_source_id = None
         if hasattr(shelf, '_check_close'): shelf._check_close()
@@ -984,6 +990,9 @@ class ItemCard(QFrame):
             self.stack_overlay.hide()
             
         shelf = self.window()
+        if hasattr(shelf, 'stop_auto_scroll'):
+            shelf.stop_auto_scroll()
+            
         mime = event.mimeData()
         source_id = None
         is_internal = False
@@ -1096,8 +1105,14 @@ class ItemCard(QFrame):
         shelf.active_drag_is_top_level = True
         shelf.active_drag_source_id = self.item_id
         
+        if hasattr(shelf, 'start_auto_scroll'):
+            shelf.start_auto_scroll()
+            
         drag.exec(Qt.DropAction.CopyAction)
         
+        if hasattr(shelf, 'stop_auto_scroll'):
+            shelf.stop_auto_scroll()
+            
         shelf.is_dragging = False
         shelf.active_drag_is_top_level = False
         shelf.active_drag_source_id = None
@@ -1443,8 +1458,37 @@ class EdgeDropShelf(QWidget):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if hasattr(self, 'drop_overlay'):
-            self.drop_overlay.setGeometry(self.rect())
-
+            self.drop_overlay.resize(self.size())
+            
+    def _handle_auto_scroll(self):
+        from PyQt6.QtGui import QCursor
+        pos = self.mapFromGlobal(QCursor.pos())
+        y = pos.y()
+        
+        scroll_bar = self.scroll.verticalScrollBar()
+        if not scroll_bar: return
+        
+        margin = 60
+        speed = 0
+        
+        if y < margin:
+            speed = -max(2, int((margin - y) / 2))
+        elif y > self.height() - margin:
+            speed = max(2, int((y - (self.height() - margin)) / 2))
+            
+        if speed != 0:
+            scroll_bar.setValue(scroll_bar.value() + speed)
+            
+    def start_auto_scroll(self):
+        if not hasattr(self, 'auto_scroll_timer'):
+            self.auto_scroll_timer = QTimer(self)
+            self.auto_scroll_timer.setInterval(16)
+            self.auto_scroll_timer.timeout.connect(self._handle_auto_scroll)
+        self.auto_scroll_timer.start()
+        
+    def stop_auto_scroll(self):
+        if hasattr(self, 'auto_scroll_timer'):
+            self.auto_scroll_timer.stop()
 
     def _apply_theme(self):
         # Update settings view by replacing it
@@ -1825,7 +1869,7 @@ class EdgeDropShelf(QWidget):
 
     def delete_subitem(self, group_id, file_path):
         if self.audio: self.audio.play_delete()
-        self.clipboard_watcher.remove_file_from_group(group_id, file_path)
+        self.clipboard_watcher.remove_file_from_group(group_id, file_path, delete_physical=True)
         self.load_history()
 
     def add_clipboard_item(self, item, to_top=True):
@@ -1890,6 +1934,8 @@ class EdgeDropShelf(QWidget):
                 self.drop_overlay.clearMask()
                 self.drop_overlay.show()
                 self.drop_overlay.raise_()
+            if not getattr(self, 'is_dragging', False):
+                self.start_auto_scroll()
             event.acceptProposedAction()
             
     def dragMoveEvent(self, event):
@@ -1922,7 +1968,10 @@ class EdgeDropShelf(QWidget):
     def dragLeaveEvent(self, event):
         if hasattr(self, 'drop_overlay'):
             self.drop_overlay.hide()
+        if not getattr(self, 'is_dragging', False):
+            self.stop_auto_scroll()
         super().dragLeaveEvent(event)
+        
     def _try_download_image(self, url_str):
         if not url_str.startswith(('http', 'https', 'data')):
             return False
@@ -1949,6 +1998,8 @@ class EdgeDropShelf(QWidget):
         return False
 
     def dropEvent(self, event):
+        if not getattr(self, 'is_dragging', False):
+            self.stop_auto_scroll()
         if hasattr(self, 'drop_overlay'):
             self.drop_overlay.hide()
             

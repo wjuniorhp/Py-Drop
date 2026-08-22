@@ -33,9 +33,37 @@ class ClipboardWatcher(QObject):
                         if new_path != path:
                             content[i] = new_path
                             changed = True
+        # Cleanup missing external files so they don't stay crossed-out forever
+        valid_history = []
+        for item in self.history:
+            item_type = item.get("type", "text")
+            content = item.get("content")
+            
+            if item_type in ["file", "image"] and isinstance(content, str):
+                if not os.path.exists(content):
+                    changed = True
+                    continue # Skip this item (it's missing)
+            elif item_type == "files" and isinstance(content, list):
+                existing_files = [p for p in content if isinstance(p, str) and os.path.exists(p)]
+                if len(existing_files) != len(content):
+                    changed = True
+                    if len(existing_files) == 0:
+                        continue # All missing, remove the group
+                    elif len(existing_files) == 1:
+                        path_str = str(existing_files[0]).replace('\\', '/')
+                        if "/images/image_" in path_str and path_str.endswith(".png"):
+                            item["type"] = "image"
+                        else:
+                            item["type"] = "file"
+                        item["content"] = existing_files[0]
+                    else:
+                        item["content"] = existing_files
+            valid_history.append(item)
+            
+        self.history = valid_history
+
         if changed:
             self.storage.save(self.history)
-            
         # Cleanup orphaned images that might have been left behind due to previous bugs
         if images_dir.exists():
             active_paths = set()
@@ -292,21 +320,34 @@ class ClipboardWatcher(QObject):
         self.history = [x for x in self.history if x.get("id") != item_id]
         self.storage.save(self.history)
         
-    def remove_file_from_group(self, group_id, file_path):
+    def remove_file_from_group(self, group_id, file_path, delete_physical=False):
         for x in self.history:
             if x.get("id") == group_id and x.get("type") == "files":
                 content = x.get("content", [])
-                if file_path in content:
-                    content.remove(file_path)
-                    # Check if it was an internal image and delete it
-                    path_str = str(file_path).replace('\\', '/')
-                    if os.path.exists(file_path) and "/images/image_" in path_str and path_str.endswith(".png"):
-                        try:
-                            os.remove(file_path)
-                        except Exception:
-                            pass
+                
+                norm_file_path = os.path.normcase(os.path.normpath(file_path))
+                norm_content = [os.path.normcase(os.path.normpath(p)) for p in content]
+                
+                if norm_file_path in norm_content:
+                    idx = norm_content.index(norm_file_path)
+                    original_path = content[idx]
+                    content.pop(idx)
+                    
+                    if delete_physical:
+                        # Check if it was an internal image and delete it
+                        path_str = str(original_path).replace('\\', '/')
+                        if os.path.exists(original_path) and "/images/image_" in path_str and path_str.endswith(".png"):
+                            try:
+                                os.remove(original_path)
+                            except Exception:
+                                pass
+                                
                 if len(content) == 1:
-                    x["type"] = "file"
+                    path_str = str(content[0]).replace('\\', '/')
+                    if "/images/image_" in path_str and path_str.endswith(".png"):
+                        x["type"] = "image"
+                    else:
+                        x["type"] = "file"
                     x["content"] = content[0]
                 elif len(content) == 0:
                     self.history.remove(x)
