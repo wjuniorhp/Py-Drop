@@ -77,6 +77,34 @@ def format_relative_time(timestamp):
     else:
         return f"{tr('há ')}{diff // 86400}{tr('d')}"
 
+import datetime
+def get_time_group(timestamp):
+    """
+    Categoriza um timestamp em grupos: Hoje, Ontem, Esta Semana, Este Mês, Antigos.
+    Retorna uma tupla (ordem, nome_traduzido).
+    """
+    if not timestamp:
+        return (99, tr("Antigos"))
+        
+    now = datetime.datetime.now()
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    item_date = datetime.datetime.fromtimestamp(timestamp)
+    item_start = item_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    days_diff = (today_start - item_start).days
+    
+    if days_diff == 0:
+        return (0, tr("Hoje"))
+    elif days_diff == 1:
+        return (1, tr("Ontem"))
+    elif days_diff <= 7:
+        return (2, tr("Últimos 7 dias"))
+    elif days_diff <= 30:
+        return (3, tr("Últimos 30 dias"))
+    else:
+        return (4, tr("Antigos"))
+
 def set_click_through(hwnd, click_through=True):
     """Makes the window click-through (transparent to mouse events)."""
     # WS_EX_TRANSPARENT = 0x00000020
@@ -85,3 +113,20 @@ def set_click_through(hwnd, click_through=True):
         user32.SetWindowLongW(hwnd, -20, style | 0x00000020)
     else:
         user32.SetWindowLongW(hwnd, -20, style & ~0x00000020)
+
+def get_foreground_window():
+    return user32.GetForegroundWindow()
+
+def set_foreground_window(hwnd):
+    if hwnd:
+        user32.SetForegroundWindow(hwnd)
+
+def simulate_paste():
+    VK_CONTROL = 0x11
+    VK_V = 0x56
+    KEYEVENTF_KEYUP = 0x0002
+    
+    user32.keybd_event(VK_CONTROL, 0, 0, 0)
+    user32.keybd_event(VK_V, 0, 0, 0)
+    user32.keybd_event(VK_V, 0, KEYEVENTF_KEYUP, 0)
+    user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)

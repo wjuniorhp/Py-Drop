@@ -16,7 +16,8 @@ DEFAULT_CONFIG = {
     "translucent_background": False,
     "accent_color": "#4CAF50",
     "language": "pt_BR",
-    "trigger_height_percent": 60
+    "trigger_height_percent": 60,
+    "click_to_paste": True
 }
 
 class Config:

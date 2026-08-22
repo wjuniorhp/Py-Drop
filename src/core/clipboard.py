@@ -320,6 +320,13 @@ class ClipboardWatcher(QObject):
         self.history = [x for x in self.history if x.get("id") != item_id]
         self.storage.save(self.history)
         
+    def update_item(self, item_id, updates):
+        for x in self.history:
+            if x.get("id") == item_id:
+                x.update(updates)
+                break
+        self.storage.save(self.history)
+        
     def remove_file_from_group(self, group_id, file_path, delete_physical=False):
         for x in self.history:
             if x.get("id") == group_id and x.get("type") == "files":
