@@ -1,3 +1,4 @@
+from src.core.i18n import tr
 import ctypes
 from ctypes import wintypes
 
@@ -68,13 +69,13 @@ def format_relative_time(timestamp):
         return ""
     diff = int(time.time() - timestamp)
     if diff < 60:
-        return "Agora mesmo"
+        return tr("Agora mesmo")
     elif diff < 3600:
-        return f"há {diff // 60}m"
+        return f"{tr('há ')}{diff // 60}{tr('m')}"
     elif diff < 86400:
-        return f"há {diff // 3600}h"
+        return f"{tr('há ')}{diff // 3600}{tr('h')}"
     else:
-        return f"há {diff // 86400}d"
+        return f"{tr('há ')}{diff // 86400}{tr('d')}"
 
 def set_click_through(hwnd, click_through=True):
     """Makes the window click-through (transparent to mouse events)."""

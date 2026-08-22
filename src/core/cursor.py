@@ -25,11 +25,22 @@ class CursorTracker(QObject):
         cx, cy = utils.get_cursor_pos()
         edge_side = self.config.get("edge_side")
         trigger_width = self.config.get("trigger_width")
+        trigger_height_percent = self.config.get("trigger_height_percent")
+        if trigger_height_percent is None: trigger_height_percent = 60
+        
+        # Area bounds
+        area_height = int(self.screen_height * (trigger_height_percent / 100.0))
+        y_pos = int((self.screen_height - area_height) / 2)
         
         if edge_side == "left":
             on_edge = cx <= trigger_width
         else: # right
             on_edge = cx >= (self.screen_width - trigger_width)
+            
+        # Check vertical bounds (must be within the area height)
+        if on_edge:
+            if not (y_pos <= cy <= y_pos + area_height):
+                on_edge = False
             
         if on_edge and utils.is_foreground_fullscreen():
             on_edge = False

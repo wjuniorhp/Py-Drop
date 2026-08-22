@@ -1,6 +1,7 @@
+from src.core.i18n import tr
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, 
-    QScrollArea, QFrame, QApplication, QStackedWidget, QSlider, QRadioButton, QCheckBox
+    QScrollArea, QFrame, QApplication, QStackedWidget, QSlider, QRadioButton, QCheckBox, QComboBox
 )
 from PyQt6.QtCore import Qt, QPoint, QPropertyAnimation, QEasingCurve, QTimer, pyqtSignal, QMimeData, QUrl, QByteArray, QRect, QRectF
 from PyQt6.QtGui import QIcon, QFont, QCursor, QColor, QPainter, QDrag, QDesktopServices, QKeyEvent, QPainterPath
@@ -340,7 +341,7 @@ class SubItemWidget(QFrame):
         v_layout.setContentsMargins(0, 0, 0, 0)
         name_lbl = QLabel(os.path.basename(file_path))
         name_lbl.setStyleSheet("color: #e0e0e0; font-size: 11px;")
-        size_lbl = QLabel(_format_size(os.path.getsize(file_path)) if os.path.exists(file_path) else "Não encontrado")
+        size_lbl = QLabel(_format_size(os.path.getsize(file_path)) if os.path.exists(file_path) else tr("Não encontrado"))
         size_lbl.setStyleSheet("color: #888888; font-size: 9px;")
         v_layout.addWidget(name_lbl)
         v_layout.addWidget(size_lbl)
@@ -353,7 +354,7 @@ class SubItemWidget(QFrame):
         self.actions_layout.setSpacing(5)
         
         dir_btn = SvgButton(PATH_FOLDER, size=12, color="#666666", hover_color="#ffffff")
-        dir_btn.setToolTip("Abrir pasta")
+        dir_btn.setToolTip(tr("Abrir pasta"))
         def open_dir():
             if os.path.exists(self.file_path):
                 if os.path.isdir(self.file_path): os.startfile(self.file_path)
@@ -362,7 +363,7 @@ class SubItemWidget(QFrame):
         self.actions_layout.addWidget(dir_btn)
         
         del_btn = SvgButton(PATH_X, size=12, color="#666666", hover_color="#ff4444")
-        del_btn.setToolTip("Remover item")
+        del_btn.setToolTip(tr("Remover item"))
         def on_del():
             if self.audio: self.audio.play_delete()
             self.delete_clicked.emit(self.file_path)
@@ -520,12 +521,12 @@ class SelectableLabel(QLabel):
             menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
             
             # The global stylesheet applies, but we want our custom actions
-            copy_action = menu.addAction("Copy")
+            copy_action = menu.addAction(tr("Copiar"))
             copy_action.setShortcut("Ctrl+C")
             
             menu.addSeparator()
             
-            select_all_action = menu.addAction("Select All")
+            select_all_action = menu.addAction(tr("Select All"))
             select_all_action.setShortcut("Ctrl+A")
             
             action = menu.exec(event.globalPos())
@@ -592,7 +593,7 @@ class ItemCard(QFrame):
         """)
         self.setAcceptDrops(True)
         
-        self.stack_overlay = QLabel("Solte aqui para agrupar", self)
+        self.stack_overlay = QLabel(tr("Solte aqui para agrupar"), self)
         self.stack_overlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.stack_overlay.setStyleSheet(f"""
             background-color: rgba(30, 30, 30, 230);
@@ -636,12 +637,12 @@ class ItemCard(QFrame):
         
         if item_type == "link":
             act_btn = SvgButton(PATH_GLOBE, size=14, color="#888888")
-            act_btn.setToolTip("Abrir link no navegador")
+            act_btn.setToolTip(tr("Abrir link no navegador"))
             act_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(self.item.get("content"))))
             header.addWidget(act_btn)
         elif item_type == "file":
             act_btn = SvgButton(PATH_FOLDER, size=14, color="#888888")
-            act_btn.setToolTip("Abrir pasta")
+            act_btn.setToolTip(tr("Abrir pasta"))
             def open_dir():
                 path = self.item.get("content")
                 if os.path.isdir(path): os.startfile(path)
@@ -652,7 +653,7 @@ class ItemCard(QFrame):
             text_content = str(content).strip()
             if os.path.exists(text_content):
                 act_btn = SvgButton(PATH_FOLDER, size=14, color="#888888")
-                act_btn.setToolTip("Abrir pasta")
+                act_btn.setToolTip(tr("Abrir pasta"))
                 def open_text_dir():
                     path = self.item.get("content").strip()
                     if os.path.isdir(path): os.startfile(path)
@@ -665,7 +666,7 @@ class ItemCard(QFrame):
                 dirs = set(os.path.normcase(os.path.dirname(p)) for p in files)
                 if len(dirs) == 1:
                     act_btn = SvgButton(PATH_FOLDER, size=14, color="#888888")
-                    act_btn.setToolTip("Abrir pasta")
+                    act_btn.setToolTip(tr("Abrir pasta"))
                     def open_group_dir():
                         d = list(dirs)[0]
                         if os.path.isdir(d): os.startfile(d)
@@ -676,13 +677,13 @@ class ItemCard(QFrame):
         
         is_pinned = item.get("pinned", False)
         self.pin_btn = SvgButton(PATH_PIN, size=16, color="#666666", hover_color="#ffffff")
-        self.pin_btn.setToolTip("Fixar item")
+        self.pin_btn.setToolTip(tr("Fixar item"))
         self.pin_btn.set_active(is_pinned)
         self.pin_btn.clicked.connect(self.on_pin)
         header.addWidget(self.pin_btn)
         
         self.del_btn = SvgButton(PATH_X, size=16, color="#666666", hover_color="#ff4444")
-        self.del_btn.setToolTip("Remover item")
+        self.del_btn.setToolTip(tr("Remover item"))
         self.del_btn.clicked.connect(self.on_delete)
         header.addWidget(self.del_btn)
         
@@ -749,7 +750,7 @@ class ItemCard(QFrame):
             self.summary_widget = QWidget()
             summary_layout = QVBoxLayout(self.summary_widget)
             summary_layout.setContentsMargins(0,0,0,0)
-            self.title_lbl = QLabel("Pasta" if len(content) == 1 and os.path.isdir(content[0]) else f"{len(content)} arquivos")
+            self.title_lbl = QLabel(tr("Pasta") if len(content) == 1 and os.path.isdir(content[0]) else f"{len(content)}{tr(' arquivos')}")
             self.title_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
             self.title_lbl.setStyleSheet("color: #ffffff; font-size: 14px; font-weight: bold; background: transparent;")
             summary_layout.addWidget(self.title_lbl)
@@ -797,7 +798,7 @@ class ItemCard(QFrame):
             icons_vlayout.addStretch()
             body_hlayout.addLayout(icons_vlayout)
             file_names = [f"• {os.path.basename(p)}" for p in content]
-            display_text = "\n".join(file_names) if len(content) <= 4 else "\n".join(file_names[:3]) + f"\n... e mais {len(content) - 3}"
+            display_text = "\n".join(file_names) if len(content) <= 4 else "\n".join(file_names[:3]) + f"\n{tr('... e mais ')}{len(content) - 3}"
             self.lbl = QLabel(display_text)
             self.lbl.setWordWrap(True)
             self.lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
@@ -1228,6 +1229,10 @@ class CollapsibleSection(QFrame):
         self.header_btn.clicked.connect(self.toggle)
         self.is_expanded = True
         
+    def set_title(self, title):
+        icon = "▼" if self.is_expanded else "▶"
+        self.header_btn.setText(f"{icon} {title}")
+
     def toggle(self):
         self.is_expanded = not self.is_expanded
         self.body_widget.setVisible(self.is_expanded)
@@ -1319,6 +1324,40 @@ class EdgeDropShelf(QWidget):
         painter.setPen(pen)
         painter.drawPath(path)
             
+    def _retranslate_ui(self):
+        self.search_input.setPlaceholderText(tr("Pesquisar..."))
+        self.trash_btn.setToolTip(tr("Limpar itens não fixados"))
+        self.pause_btn.setToolTip(tr("Pausar/Retomar captura"))
+        self.settings_btn.setToolTip(tr("Configurações"))
+        self.pinned_section.set_title(tr("Itens Fixados"))
+        
+        if self.search_input.text().strip():
+            self._on_search(self.search_input.text())
+        else:
+            self.empty_lbl.setText(tr("Shelf is empty."))
+        
+        # Overlay translates
+        # self.stack_overlay translates dynamically on drag enter
+        
+        # Settings translations
+        if hasattr(self, 'lbl_settings_title'):
+            self.lbl_settings_title.setText(tr("Configurações"))
+            self.lbl_lang.setText(tr("Idioma"))
+            self.cb_sound.setText(tr("Efeitos Sonoros"))
+            self.lbl_color.setText(tr("Cor Destaque"))
+            self.cb_translucent.setText(tr("Fundo Translúcido"))
+            self.lbl_side.setText(tr("Lado da Borda"))
+            self.rb_left.setText(tr("Borda Esquerda"))
+            self.rb_right.setText(tr("Borda Direita"))
+            self.lbl_sens.setText(tr("Área de Ativação (pixels)"))
+            self.lbl_width.setText(tr("Largura da Prateleira (pixels)"))
+            self.lbl_hk.setText(tr("Atalho Global (Clique p/ capturar)"))
+            self.hotkey_btn.setToolTip(tr("Clique para redefinir o atalho"))
+            self.restart_btn.setText(tr("Reiniciar Aplicativo"))
+            self.restart_btn.setToolTip(tr("Reiniciar o Py-Drop"))
+            self.exit_btn.setText(tr("Sair do Aplicativo"))
+            self.exit_btn.setToolTip(tr("Encerrar o Py-Drop completamente"))
+            
     def _setup_ui(self):
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(5, 15, 5, 15)
@@ -1344,23 +1383,24 @@ class EdgeDropShelf(QWidget):
         h_layout.addWidget(title)
         
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Pesquisar...")
+        self.search_input.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
+        self.search_input.setPlaceholderText(tr("Pesquisar..."))
         self.search_input.setStyleSheet("background: #222; color: white; border: none; border-radius: 4px; padding: 2px 5px;")
         self.search_input.textChanged.connect(self._on_search)
         h_layout.addWidget(self.search_input)
         
-        trash_btn = SvgButton(PATH_TRASH, size=16, color="#888888", hover_color="#ff4444")
-        trash_btn.setToolTip("Limpar itens não fixados")
-        trash_btn.clicked.connect(self._clear_unpinned)
-        h_layout.addWidget(trash_btn)
+        self.trash_btn = SvgButton(PATH_TRASH, size=16, color="#888888", hover_color="#ff4444")
+        self.trash_btn.setToolTip(tr("Limpar itens não fixados"))
+        self.trash_btn.clicked.connect(self._clear_unpinned)
+        h_layout.addWidget(self.trash_btn)
         
         self.pause_btn = SvgButton(PATH_PAUSE, size=16, color="#888888", hover_color="#ffffff")
-        self.pause_btn.setToolTip("Pausar/Retomar captura")
+        self.pause_btn.setToolTip(tr("Pausar/Retomar captura"))
         self.pause_btn.clicked.connect(self._toggle_pause)
         h_layout.addWidget(self.pause_btn)
         
         self.settings_btn = SvgButton(PATH_SETTINGS, size=16, color="#888888", hover_color="#ffffff")
-        self.settings_btn.setToolTip("Configurações")
+        self.settings_btn.setToolTip(tr("Configurações"))
         self.settings_btn.clicked.connect(self._toggle_settings)
         h_layout.addWidget(self.settings_btn)
         
@@ -1410,7 +1450,7 @@ class EdgeDropShelf(QWidget):
         self.items_layout.setContentsMargins(0, 10, 10, 10)
         self.items_layout.setSpacing(10)
         
-        self.pinned_section = CollapsibleSection("Itens Fixados", accent_color=self.accent_color)
+        self.pinned_section = CollapsibleSection(tr("Itens Fixados"), accent_color=self.accent_color)
         self.pinned_section.hide()
         self.items_layout.addWidget(self.pinned_section)
         
@@ -1424,7 +1464,7 @@ class EdgeDropShelf(QWidget):
         self.scroll.setWidget(self.scroll_content)
         v_layout.addWidget(self.scroll)
         
-        self.empty_lbl = QLabel("A prateleira está vazia.")
+        self.empty_lbl = QLabel(tr("A prateleira está vazia."))
         self.empty_lbl.setStyleSheet("color: #666; font-size: 14px;")
         self.empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         v_layout.addWidget(self.empty_lbl)
@@ -1440,7 +1480,7 @@ class EdgeDropShelf(QWidget):
         main_layout.addWidget(self.bg_frame)
         
         # Drop overlay
-        self.drop_overlay = QLabel("Solte aqui", self)
+        self.drop_overlay = QLabel(tr("Solte aqui"), self)
         self.drop_overlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.drop_overlay.setStyleSheet("""
             QLabel {
@@ -1551,9 +1591,35 @@ class EdgeDropShelf(QWidget):
         layout = QVBoxLayout(self.settings_view)
         layout.setContentsMargins(20, 20, 20, 20)
         
-        lbl = QLabel("Configurações")
-        lbl.setStyleSheet("color: white; font-size: 18px; font-weight: bold;")
-        layout.addWidget(lbl)
+        self.lbl_settings_title = QLabel(tr("Configurações"))
+        self.lbl_settings_title.setStyleSheet("color: white; font-size: 18px; font-weight: bold;")
+        layout.addWidget(self.lbl_settings_title)
+
+        # Language Selector
+        self.lbl_lang = QLabel(tr("Idioma"))
+        self.lbl_lang.setStyleSheet("color: #aaaaaa; margin-top: 15px;")
+        layout.addWidget(self.lbl_lang)
+        
+        self.cb_lang = QComboBox()
+        self.cb_lang.setStyleSheet("QComboBox { background: #222; color: white; border-radius: 4px; padding: 5px; font-weight: bold; } QComboBox QAbstractItemView { background: #222; color: white; selection-background-color: " + self.accent_color + "; }")
+        self.cb_lang.addItem("Português", "pt_BR")
+        self.cb_lang.addItem("English", "en_US")
+        
+        current_lang = self.config.get("language")
+        index = self.cb_lang.findData(current_lang)
+        if index >= 0:
+            self.cb_lang.setCurrentIndex(index)
+            
+        def on_lang_changed(idx):
+            lang_code = self.cb_lang.itemData(idx)
+            self.config.set("language", lang_code)
+            from src.core.i18n import set_language
+            set_language(lang_code)
+            self._retranslate_ui()
+            self.load_history()
+            
+        self.cb_lang.currentIndexChanged.connect(on_lang_changed)
+        layout.addWidget(self.cb_lang)
         
         checkbox_style = f"""
             QCheckBox {{ color: white; }}
@@ -1563,7 +1629,7 @@ class EdgeDropShelf(QWidget):
         """
         
         # Sound
-        self.cb_sound = QCheckBox("Efeitos Sonoros")
+        self.cb_sound = QCheckBox(tr("Efeitos Sonoros"))
         self.cb_sound.setStyleSheet(checkbox_style)
         self.cb_sound.setCursor(Qt.CursorShape.PointingHandCursor)
         self.cb_sound.setChecked(self.config.get("sound_enabled"))
@@ -1572,9 +1638,9 @@ class EdgeDropShelf(QWidget):
         
 
         # Accent Color
-        lbl_color = QLabel("Cor Destaque")
-        lbl_color.setStyleSheet("color: #aaaaaa; margin-top: 15px;")
-        layout.addWidget(lbl_color)
+        self.lbl_color = QLabel(tr("Cor Destaque"))
+        self.lbl_color.setStyleSheet("color: #aaaaaa; margin-top: 15px;")
+        layout.addWidget(self.lbl_color)
         
         self.color_btn = QPushButton(self.accent_color)
         self.color_btn.setStyleSheet(f"background: {self.accent_color}; color: white; border-radius: 4px; padding: 5px; font-weight: bold;")
@@ -1593,7 +1659,7 @@ class EdgeDropShelf(QWidget):
         layout.addWidget(self.color_btn)
 
         # Translucent Background
-        self.cb_translucent = QCheckBox("Fundo Translúcido")
+        self.cb_translucent = QCheckBox(tr("Fundo Translúcido"))
         self.cb_translucent.setStyleSheet(checkbox_style)
         self.cb_translucent.setCursor(Qt.CursorShape.PointingHandCursor)
         self.cb_translucent.setChecked(self.config.get("translucent_background"))
@@ -1604,9 +1670,9 @@ class EdgeDropShelf(QWidget):
         layout.addWidget(self.cb_translucent)
         
         # Edge side
-        lbl_side = QLabel("Lado da Borda")
-        lbl_side.setStyleSheet("color: #aaaaaa; margin-top: 15px;")
-        layout.addWidget(lbl_side)
+        self.lbl_side = QLabel(tr("Lado da Borda"))
+        self.lbl_side.setStyleSheet("color: #aaaaaa; margin-top: 15px;")
+        layout.addWidget(self.lbl_side)
         
         radio_style = f"""
             QRadioButton {{ color: white; }}
@@ -1615,8 +1681,8 @@ class EdgeDropShelf(QWidget):
             QRadioButton::indicator:checked {{ width: 6px; height: 6px; background: #111; border: 4px solid {self.accent_color}; }}
         """
         
-        self.rb_left = QRadioButton("Borda Esquerda")
-        self.rb_right = QRadioButton("Borda Direita")
+        self.rb_left = QRadioButton(tr("Borda Esquerda"))
+        self.rb_right = QRadioButton(tr("Borda Direita"))
         self.rb_left.setStyleSheet(radio_style)
         self.rb_right.setStyleSheet(radio_style)
         self.rb_left.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -1640,22 +1706,69 @@ class EdgeDropShelf(QWidget):
         layout.addWidget(self.rb_right)
         
         # Sensitivity
-        lbl_sens = QLabel("Área de Ativação (pixels)")
-        lbl_sens.setStyleSheet("color: #aaaaaa; margin-top: 15px;")
-        layout.addWidget(lbl_sens)
+        self.lbl_sens = QLabel(tr("Área de Ativação (pixels)"))
+        self.lbl_sens.setStyleSheet("color: #aaaaaa; margin-top: 15px;")
+        layout.addWidget(self.lbl_sens)
         
         slider = QSlider(Qt.Orientation.Horizontal)
         slider.setRange(1, 15)
         slider.setCursor(Qt.CursorShape.PointingHandCursor)
         slider.setValue(self.config.get("trigger_width"))
         slider.setStyleSheet(f"QSlider::handle:horizontal {{ background: {self.accent_color}; border-radius: 5px; width: 10px; }}")
-        slider.valueChanged.connect(lambda val: self.config.set("trigger_width", val))
+        
+        def on_sens_changed(val):
+            self.config.set("trigger_width", val)
+            if not getattr(self, 'preview_win', None):
+                self.preview_win = QWidget()
+                self.preview_win.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool | Qt.WindowType.WindowTransparentForInput)
+                self.preview_win.setWindowOpacity(0.5)
+                self.preview_win.setStyleSheet(f"background-color: {self.accent_color};")
+            
+            side = self.config.get("edge_side")
+            screen_geo = QApplication.primaryScreen().geometry()
+            
+            trigger_height_percent = self.config.get("trigger_height_percent")
+            if trigger_height_percent is None: trigger_height_percent = 60
+            area_height = int(screen_geo.height() * (trigger_height_percent / 100.0))
+            y_pos = int((screen_geo.height() - area_height) / 2)
+            
+            x = 0 if side == "left" else screen_geo.width() - val
+            self.preview_win.setGeometry(x, y_pos, val, area_height)
+            self.preview_win.show()
+            
+        def on_sens_released():
+            if getattr(self, 'preview_win', None):
+                self.preview_win.hide()
+                self.preview_win.deleteLater()
+                self.preview_win = None
+                
+        slider.valueChanged.connect(on_sens_changed)
+        slider.sliderReleased.connect(on_sens_released)
         layout.addWidget(slider)
         
+        # Sensitivity Height
+        self.lbl_sens_height = QLabel(tr("Altura da Área de Ativação (%)"))
+        self.lbl_sens_height.setStyleSheet("color: #aaaaaa; margin-top: 15px;")
+        layout.addWidget(self.lbl_sens_height)
+        
+        slider_height = QSlider(Qt.Orientation.Horizontal)
+        slider_height.setRange(20, 100)
+        slider_height.setCursor(Qt.CursorShape.PointingHandCursor)
+        slider_height.setValue(self.config.get("trigger_height_percent"))
+        slider_height.setStyleSheet(f"QSlider::handle:horizontal {{ background: {self.accent_color}; border-radius: 5px; width: 10px; }}")
+        
+        def on_height_changed(val):
+            self.config.set("trigger_height_percent", val)
+            on_sens_changed(self.config.get("trigger_width"))
+            
+        slider_height.valueChanged.connect(on_height_changed)
+        slider_height.sliderReleased.connect(on_sens_released)
+        layout.addWidget(slider_height)
+        
         # Shelf Width
-        lbl_width = QLabel("Largura da Prateleira (pixels)")
-        lbl_width.setStyleSheet("color: #aaaaaa; margin-top: 15px;")
-        layout.addWidget(lbl_width)
+        self.lbl_width = QLabel(tr("Largura da Prateleira (pixels)"))
+        self.lbl_width.setStyleSheet("color: #aaaaaa; margin-top: 15px;")
+        layout.addWidget(self.lbl_width)
         
         slider_width = QSlider(Qt.Orientation.Horizontal)
         slider_width.setRange(200, 600)
@@ -1677,46 +1790,48 @@ class EdgeDropShelf(QWidget):
         layout.addWidget(slider_width)
         
         # Hotkey
-        lbl_hk = QLabel("Atalho Global (Clique p/ capturar)")
-        lbl_hk.setStyleSheet("color: #aaaaaa; margin-top: 15px;")
-        layout.addWidget(lbl_hk)
+        self.lbl_hk = QLabel(tr("Atalho Global (Clique p/ capturar)"))
+        self.lbl_hk.setStyleSheet("color: #aaaaaa; margin-top: 15px;")
+        layout.addWidget(self.lbl_hk)
         
         self.hotkey_btn = QPushButton(self.config.get("hotkey"))
-        self.hotkey_btn.setToolTip("Clique para redefinir o atalho")
+        self.hotkey_btn.setToolTip(tr("Clique para redefinir o atalho"))
         self.hotkey_btn.setStyleSheet("background: #222; color: white; border-radius: 4px; padding: 5px; font-weight: bold;")
         self.hotkey_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.is_capturing = False
         
         def on_hk_click():
             self.is_capturing = True
-            self.hotkey_btn.setText("Aguardando tecla...")
+            self.hotkey_btn.setText(tr("Aguardando tecla..."))
             self.hotkey_btn.setStyleSheet(f"background: {self.accent_color}; color: white; border-radius: 4px; padding: 5px; font-weight: bold;")
             self.hotkey_btn.setFocus()
             
         self.hotkey_btn.clicked.connect(on_hk_click)
         layout.addWidget(self.hotkey_btn)
         
+
+
         layout.addStretch()
         
         # Actions
         actions_layout = QHBoxLayout()
-        restart_btn = QPushButton("Reiniciar Aplicativo")
-        restart_btn.setToolTip("Reiniciar o Py-Drop")
-        restart_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        restart_btn.setStyleSheet("background: #222; color: #ff4444; border-radius: 4px; padding: 8px; font-weight: bold;")
+        self.restart_btn = QPushButton(tr("Reiniciar Aplicativo"))
+        self.restart_btn.setToolTip(tr("Reiniciar o Py-Drop"))
+        self.restart_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.restart_btn.setStyleSheet("background: #222; color: #ff4444; border-radius: 4px; padding: 8px; font-weight: bold;")
         def on_restart():
             import sys, subprocess
             subprocess.Popen([sys.executable] + sys.argv)
             QApplication.quit()
-        restart_btn.clicked.connect(on_restart)
-        actions_layout.addWidget(restart_btn)
+        self.restart_btn.clicked.connect(on_restart)
+        actions_layout.addWidget(self.restart_btn)
         
-        exit_btn = QPushButton("Sair do Aplicativo")
-        exit_btn.setToolTip("Encerrar o Py-Drop completamente")
-        exit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        exit_btn.setStyleSheet("background: #222; color: #ff4444; border-radius: 4px; padding: 8px; font-weight: bold;")
-        exit_btn.clicked.connect(QApplication.quit)
-        actions_layout.addWidget(exit_btn)
+        self.exit_btn = QPushButton(tr("Sair do Aplicativo"))
+        self.exit_btn.setToolTip(tr("Encerrar o Py-Drop completamente"))
+        self.exit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.exit_btn.setStyleSheet("background: #222; color: #ff4444; border-radius: 4px; padding: 8px; font-weight: bold;")
+        self.exit_btn.clicked.connect(QApplication.quit)
+        actions_layout.addWidget(self.exit_btn)
         
         layout.addLayout(actions_layout)
 
@@ -1790,10 +1905,10 @@ class EdgeDropShelf(QWidget):
                 card.hide()
         
         if visible == 0 and self.item_widgets:
-            self.empty_lbl.setText("No matches found.")
+            self.empty_lbl.setText(tr("No matches found."))
             self.empty_lbl.show()
         elif not self.item_widgets:
-            self.empty_lbl.setText("Shelf is empty.")
+            self.empty_lbl.setText(tr("Shelf is empty."))
             self.empty_lbl.show()
         else:
             self.empty_lbl.hide()
@@ -1913,7 +2028,7 @@ class EdgeDropShelf(QWidget):
         self.pinned_section.setVisible(has_pinned)
             
         if not self.item_widgets:
-            self.empty_lbl.setText("Shelf is empty.")
+            self.empty_lbl.setText(tr("Shelf is empty."))
             self.empty_lbl.show()
 
     def pin_item(self, item_id):
@@ -1928,9 +2043,9 @@ class EdgeDropShelf(QWidget):
         if event.mimeData().hasUrls() or event.mimeData().hasText() or event.mimeData().hasImage():
             if hasattr(self, 'drop_overlay'):
                 if hasattr(self, 'active_drag_source_id') and self.active_drag_source_id:
-                    self.drop_overlay.setText("Solte aqui para desagrupar")
+                    self.drop_overlay.setText(tr("Solte aqui para desagrupar"))
                 else:
-                    self.drop_overlay.setText("Solte aqui")
+                    self.drop_overlay.setText(tr("Solte aqui"))
                 self.drop_overlay.clearMask()
                 self.drop_overlay.show()
                 self.drop_overlay.raise_()

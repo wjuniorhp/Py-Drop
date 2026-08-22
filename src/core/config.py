@@ -14,7 +14,9 @@ DEFAULT_CONFIG = {
     "hotkey": "Ctrl+Alt+V",
     "shelf_width": 340,
     "translucent_background": False,
-    "accent_color": "#4CAF50"
+    "accent_color": "#4CAF50",
+    "language": "pt_BR",
+    "trigger_height_percent": 60
 }
 
 class Config:

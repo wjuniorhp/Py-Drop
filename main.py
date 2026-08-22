@@ -8,6 +8,7 @@ from src.core.config import Config
 from src.core.storage import Storage
 from src.utils.audio import AudioEngine
 from src.core.hotkey import GlobalHotkey, parse_hotkey_string
+from src.core.i18n import set_language
 
 def main():
     app = QApplication(sys.argv)
@@ -15,6 +16,8 @@ def main():
     app.setStyleSheet("QToolTip { color: #ffffff; background-color: #2a2a2a; border: 1px solid #555555; padding: 4px; border-radius: 4px; }")
     
     config = Config()
+    set_language(config.get("language"))
+    
     audio = AudioEngine(config)
     storage = Storage()
     
