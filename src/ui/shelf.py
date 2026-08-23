@@ -626,6 +626,13 @@ class ItemCard(QFrame):
         super().__init__()
         self.item = item
         self.item_id = item.get("id")
+        
+        # Snapshots for fast rendering checks
+        self.render_timestamp = item.get("timestamp")
+        self.render_type = item.get("type")
+        self.render_pinned = item.get("pinned")
+        self.render_content_len = len(item.get("content")) if isinstance(item.get("content"), list) else 1
+        
         self.audio = audio
         self.shelf_width = shelf_width
         self.accent_color = accent_color
@@ -1104,6 +1111,8 @@ class ItemCard(QFrame):
         source_id = None
         is_internal = False
         
+        is_subitem = False
+        
         # Check internal drags first
         if mime.hasFormat("edgedrop/internal-drag-item"):
             source_id = str(mime.data("edgedrop/internal-drag-item"), 'utf-8')
@@ -1111,6 +1120,7 @@ class ItemCard(QFrame):
         elif mime.hasFormat("edgedrop/internal-drag-subitem"):
             source_id = str(mime.data("edgedrop/internal-drag-subitem"), 'utf-8')
             is_internal = True
+            is_subitem = True
             
         if source_id == self.item_id:
             event.ignore()
@@ -1131,9 +1141,13 @@ class ItemCard(QFrame):
                 source_data = source_item.get("content")
                 
         if source_data and self._is_valid_grouping(event):
-            shelf.clipboard_watcher.stack_items(self.item_id, source_data, source_id, is_internal)
-            from PyQt6.QtCore import QTimer
-            QTimer.singleShot(0, shelf.load_history)
+            if is_subitem:
+                file_to_remove = source_data[0] if isinstance(source_data, list) else source_data
+                shelf.clipboard_watcher.remove_file_from_group(source_id, file_to_remove)
+                # Pass is_internal=False to stack_items so it doesn't delete the entire source group!
+                shelf.clipboard_watcher.stack_items(self.item_id, source_data, source_id, False)
+            else:
+                shelf.clipboard_watcher.stack_items(self.item_id, source_data, source_id, is_internal)
             event.acceptProposedAction()
         else:
             event.ignore()
@@ -2140,40 +2154,71 @@ class EdgeDropShelf(QWidget):
             self.animation.start()
 
     def load_history(self):
-        for w in self.item_widgets.values():
-            w.setParent(None)
-            w.deleteLater()
-        self.item_widgets.clear()
-        
-        # Remove old dividers
-        for i in reversed(range(self.unpinned_layout.count())):
-            layout_item = self.unpinned_layout.itemAt(i)
-            if layout_item and layout_item.widget():
-                w = layout_item.widget()
-                if isinstance(w, TimeDividerWidget):
-                    w.setParent(None)
-                    w.deleteLater()
-        
         history = self.clipboard_watcher.get_history()
         
+        # 1. Identify which items to keep and which to delete
+        current_history_map = {item.get("id"): item for item in history}
+        
+        # Remove widgets that no longer exist, or whose type/timestamp/content changed
+        for w_id in list(self.item_widgets.keys()):
+            w = self.item_widgets[w_id]
+            h_item = current_history_map.get(w_id)
+            # Compare basic attributes to see if we can reuse the widget
+            if not h_item:
+                w = self.item_widgets.pop(w_id)
+                w.setParent(None)
+                w.deleteLater()
+                continue
+                
+            h_content_len = len(h_item.get("content")) if isinstance(h_item.get("content"), list) else 1
+            if w.render_timestamp != h_item.get("timestamp") or w.render_content_len != h_content_len or w.render_pinned != h_item.get("pinned") or w.render_type != h_item.get("type"):
+                w = self.item_widgets.pop(w_id)
+                w.setParent(None)
+                w.deleteLater()
+                
+        # 2. Clear layouts (remove without deleting remaining widgets)
+        while self.pinned_section.body_layout.count():
+            item = self.pinned_section.body_layout.takeAt(0)
+            if item.widget():
+                item.widget().setParent(None)
+                
+        while self.unpinned_layout.count():
+            item = self.unpinned_layout.takeAt(0)
+            if item.widget():
+                w = item.widget()
+                w.setParent(None)
+                if isinstance(w, TimeDividerWidget):
+                    w.deleteLater()
+                    
+        # 3. Rebuild UI
         has_pinned = False
         from src.utils.helpers import get_time_group
         current_group_id = None
         
-        # History is retrieved newest to oldest, so if we add sequentially to the bottom of the list, 
-        # it will be in the correct order: newest on top, oldest on bottom.
-        # But wait! If we append sequentially (to_top=False), it will be ordered correctly!
         for item in history:
-            if item.get("pinned"):
+            item_id = item.get("id")
+            is_pinned = item.get("pinned")
+            
+            if is_pinned:
                 has_pinned = True
-                self.add_clipboard_item(item, to_top=False)
-            else:
+                
+            layout = self.pinned_section.body_layout if is_pinned else self.unpinned_layout
+            
+            if not is_pinned:
                 grp_id, grp_name = get_time_group(item.get("timestamp"))
                 if grp_id != current_group_id:
                     current_group_id = grp_id
                     divider = TimeDividerWidget(grp_name)
-                    self.unpinned_layout.addWidget(divider)
+                    layout.addWidget(divider)
                     divider.show()
+            
+            if item_id in self.item_widgets:
+                # Reuse existing widget
+                card = self.item_widgets[item_id]
+                layout.addWidget(card)
+                card.show()
+            else:
+                # Create new widget (this will add it to the layout and self.item_widgets)
                 self.add_clipboard_item(item, to_top=False)
                 
         self.pinned_section.setVisible(has_pinned)
@@ -2248,6 +2293,7 @@ class EdgeDropShelf(QWidget):
                 self.unpinned_layout.addWidget(card)
                 
         self.item_widgets[item_id] = card
+        card.show()
         
     def delete_item(self, item_id):
         self.clipboard_watcher.remove_item(item_id)
@@ -2363,7 +2409,6 @@ class EdgeDropShelf(QWidget):
                     self.clipboard_watcher.remove_file_from_group(parent_id, local_files[0])
                     # Add as new top-level item
                     self.clipboard_watcher.copy_to_clipboard(local_files[0], add_to_shelf=True)
-                    QTimer.singleShot(0, self.load_history)
                     event.acceptProposedAction()
                     return
                     
