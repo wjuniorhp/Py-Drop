@@ -693,10 +693,10 @@ class ItemCard(QFrame):
         header.addWidget(icon_lbl)
         
         time_text = utils.format_relative_time(item.get("timestamp"))
-        time_lbl = QLabel(time_text)
-        time_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        time_lbl.setStyleSheet("color: #555555; font-size: 10px; margin-left: 5px;")
-        header.addWidget(time_lbl)
+        self.time_lbl = QLabel(time_text)
+        self.time_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.time_lbl.setStyleSheet("color: #555555; font-size: 10px; margin-left: 5px;")
+        header.addWidget(self.time_lbl)
         
         if item_type == "link":
             act_btn = SvgButton(PATH_GLOBE, size=14, color="#888888")
@@ -1356,6 +1356,13 @@ class ItemCard(QFrame):
                 if self.audio: self.audio.play_toggle()
         super().mouseReleaseEvent(event)
 
+    def update_timestamp(self):
+        if hasattr(self, 'time_lbl') and self.item.get("timestamp"):
+            from src.utils import helpers as utils
+            new_text = utils.format_relative_time(self.item.get("timestamp"))
+            if self.time_lbl.text() != new_text:
+                self.time_lbl.setText(new_text)
+
 
 class CollapsibleSection(QFrame):
     toggled_state = pyqtSignal(bool)
@@ -1443,6 +1450,15 @@ class EdgeDropShelf(QWidget):
         self.clipboard_watcher.new_item.connect(lambda item: self.load_history())
         if hasattr(self.clipboard_watcher, 'history_changed'):
             self.clipboard_watcher.history_changed.connect(self.load_history)
+            
+        self.time_update_timer = QTimer(self)
+        self.time_update_timer.timeout.connect(self._update_all_timestamps)
+        self.time_update_timer.start(30000)
+
+    def _update_all_timestamps(self):
+        for card in self.item_widgets.values():
+            if hasattr(card, 'update_timestamp'):
+                card.update_timestamp()
 
     def _calc_positions(self):
         if self.edge_side == "left":
