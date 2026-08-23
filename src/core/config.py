@@ -17,7 +17,8 @@ DEFAULT_CONFIG = {
     "accent_color": "#4CAF50",
     "language": "pt_BR",
     "trigger_height_percent": 60,
-    "click_to_paste": True
+    "click_to_paste": True,
+    "pinned_section_expanded": True
 }
 
 class Config:
@@ -47,8 +48,8 @@ class Config:
         except IOError:
             pass
 
-    def get(self, key):
-        return self.settings.get(key, DEFAULT_CONFIG.get(key))
+    def get(self, key, default=None):
+        return self.settings.get(key, default if default is not None else DEFAULT_CONFIG.get(key))
         
     def set(self, key, value):
         self.settings[key] = value

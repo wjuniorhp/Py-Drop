@@ -1,7 +1,7 @@
 from src.core.i18n import tr
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, 
-    QScrollArea, QFrame, QApplication, QStackedWidget, QSlider, QRadioButton, QCheckBox, QComboBox
+    QScrollArea, QFrame, QApplication, QStackedWidget, QSlider, QRadioButton, QCheckBox, QComboBox, QFormLayout
 )
 from PyQt6.QtCore import Qt, QPoint, QPropertyAnimation, QEasingCurve, QTimer, pyqtSignal, QMimeData, QUrl, QByteArray, QRect, QRectF
 from PyQt6.QtGui import QIcon, QFont, QCursor, QColor, QPainter, QDrag, QDesktopServices, QKeyEvent, QPainterPath
@@ -813,7 +813,11 @@ class ItemCard(QFrame):
             self.summary_widget = QWidget()
             summary_layout = QVBoxLayout(self.summary_widget)
             summary_layout.setContentsMargins(0,0,0,0)
-            self.title_lbl = QLabel(tr("Folder") if len(content) == 1 and os.path.isdir(content[0]) else tr("{} files").replace("{}", str(len(content))))
+            if len(content) == 1:
+                title_txt = tr("Folder") if os.path.isdir(content[0]) else tr("1 file")
+            else:
+                title_txt = tr("{} files").replace("{}", str(len(content)))
+            self.title_lbl = QLabel(title_txt)
             self.title_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
             self.title_lbl.setStyleSheet("color: #ffffff; font-size: 14px; font-weight: bold; background: transparent;")
             summary_layout.addWidget(self.title_lbl)
@@ -896,7 +900,7 @@ class ItemCard(QFrame):
             
             title_text = item.get("link_title")
             if not title_text:
-                title_text = tr("Loading preview...") if not item.get("preview_fetched") else "Link"
+                title_text = tr("Loading preview...") if not item.get("preview_fetched") else tr("Link")
             
             self.link_title_lbl = QLabel(title_text)
             self.link_title_lbl.setWordWrap(True)
@@ -1354,6 +1358,8 @@ class ItemCard(QFrame):
 
 
 class CollapsibleSection(QFrame):
+    toggled_state = pyqtSignal(bool)
+
     def set_accent_color(self, hex_color):
         from PyQt6.QtGui import QColor
         c = QColor(hex_color).darker(150)
@@ -1367,7 +1373,7 @@ class CollapsibleSection(QFrame):
             }}
         """)
 
-    def __init__(self, title, parent=None, accent_color="#4CAF50"):
+    def __init__(self, title, parent=None, accent_color="#4CAF50", expanded=True):
         super().__init__(parent)
         self.setObjectName("PinnedSection")
         self.set_accent_color(accent_color)
@@ -1387,18 +1393,23 @@ class CollapsibleSection(QFrame):
         self.layout.addWidget(self.body_widget)
         
         self.header_btn.clicked.connect(self.toggle)
-        self.is_expanded = True
+        self.is_expanded = expanded
+        self.body_widget.setVisible(self.is_expanded)
+        self.set_title(title)
         
     def set_title(self, title):
         icon = "▼" if self.is_expanded else "▶"
+        # If title already contains the icon, strip it
+        if title.startswith("▼ ") or title.startswith("▶ "):
+            title = title[2:]
         self.header_btn.setText(f"{icon} {title}")
 
     def toggle(self):
         self.is_expanded = not self.is_expanded
         self.body_widget.setVisible(self.is_expanded)
-        icon = "▼" if self.is_expanded else "▶"
-        title = self.header_btn.text().split(" ", 1)[1]
-        self.header_btn.setText(f"{icon} {title}")
+        title = self.header_btn.text().split(" ", 1)[1] if " " in self.header_btn.text() else self.header_btn.text()
+        self.set_title(title)
+        self.toggled_state.emit(self.is_expanded)
 
 
 class EdgeDropShelf(QWidget):
@@ -1484,6 +1495,16 @@ class EdgeDropShelf(QWidget):
         painter.setPen(pen)
         painter.drawPath(path)
             
+    def _rebuild_settings_view_delayed(self):
+        was_settings = self.is_settings_view
+        self.stacked.removeWidget(self.settings_view)
+        self.settings_view.deleteLater()
+        self.settings_view = QWidget()
+        self._build_settings_view()
+        self.stacked.addWidget(self.settings_view)
+        if was_settings:
+            self.stacked.setCurrentWidget(self.settings_view)
+
     def _retranslate_ui(self):
         self.search_input.setPlaceholderText(tr("Search..."))
         self.trash_btn.setToolTip(tr("Clear unpinned items"))
@@ -1496,34 +1517,9 @@ class EdgeDropShelf(QWidget):
         else:
             self.empty_lbl.setText(tr("The shelf is empty."))
             
-        self.load_history()
+        self.load_history(force_rebuild=True)
         
-        # Overlay translates
-        # self.stack_overlay translates dynamically on drag enter
-        
-        # Settings translations
-        if hasattr(self, 'lbl_settings_title'):
-            self.lbl_settings_title.setText(tr("Settings"))
-            self.lbl_lang.setText(tr("Language"))
-            self.cb_sound.setText(tr("Sound Effects"))
-            if hasattr(self, 'lbl_click_behavior'):
-                self.lbl_click_behavior.setText(tr("Left-click behavior:"))
-                self.click_behavior_cb.setItemText(0, tr("Copy and Paste in Window"))
-                self.click_behavior_cb.setItemText(1, tr("Copy Only"))
-            self.lbl_color.setText(tr("Accent Color"))
-            self.cb_translucent.setText(tr("Translucent Background"))
-            self.lbl_side.setText(tr("Edge Side"))
-            self.rb_left.setText(tr("Left Edge"))
-            self.rb_right.setText(tr("Right Edge"))
-            self.lbl_sens.setText(tr("Trigger Area (pixels)"))
-            self.lbl_width.setText(tr("Shelf Width (pixels)"))
-            self.lbl_hk.setText(tr("Global Hotkey (Click to capture)"))
-            self.hotkey_btn.setToolTip(tr("Click to redefine hotkey"))
-            self.restart_btn.setText(tr("Restart Application"))
-            self.restart_btn.setToolTip(tr("Restart Py-Drop"))
-            self.exit_btn.setText(tr("Quit Application"))
-            self.exit_btn.setToolTip(tr("Quit Py-Drop completely"))
-            
+        QTimer.singleShot(0, self._rebuild_settings_view_delayed)
 
     def _setup_ui(self):
         main_layout = QVBoxLayout(self)
@@ -1617,7 +1613,9 @@ class EdgeDropShelf(QWidget):
         self.items_layout.setContentsMargins(0, 10, 10, 10)
         self.items_layout.setSpacing(10)
         
-        self.pinned_section = CollapsibleSection(tr("Pinned Items"), accent_color=self.accent_color)
+        is_expanded = self.config.get("pinned_section_expanded", True)
+        self.pinned_section = CollapsibleSection(tr("Pinned Items"), accent_color=self.accent_color, expanded=is_expanded)
+        self.pinned_section.toggled_state.connect(lambda expanded: self.config.set("pinned_section_expanded", expanded))
         self.pinned_section.hide()
         self.items_layout.addWidget(self.pinned_section)
         
@@ -1755,20 +1753,80 @@ class EdgeDropShelf(QWidget):
             """)
 
     def _build_settings_view(self):
-        layout = QVBoxLayout(self.settings_view)
-        layout.setContentsMargins(20, 20, 20, 20)
+        # We need a main layout for settings_view itself
+        outer_layout = QVBoxLayout(self.settings_view)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("""
+            QScrollArea { border: none; background: transparent; }
+            QWidget#ScrollContainer { background: transparent; }
+            QScrollBar:vertical { background: #1a1a1a; width: 8px; border-radius: 4px; }
+            QScrollBar::handle:vertical { background: #555; border-radius: 4px; }
+            QScrollBar::handle:vertical:hover { background: #777; }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
+        """)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        
+        container = QWidget()
+        container.setObjectName("ScrollContainer")
+        scroll.setWidget(container)
+        outer_layout.addWidget(scroll)
+        
+        main_layout = QVBoxLayout(container)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(25)
         
         self.lbl_settings_title = QLabel(tr("Settings"))
-        self.lbl_settings_title.setStyleSheet("color: white; font-size: 18px; font-weight: bold;")
-        layout.addWidget(self.lbl_settings_title)
+        self.lbl_settings_title.setStyleSheet("color: white; font-size: 22px; font-weight: bold;")
+        main_layout.addWidget(self.lbl_settings_title)
 
-        # Language Selector
-        self.lbl_lang = QLabel(tr("Language"))
-        self.lbl_lang.setStyleSheet("color: #aaaaaa; margin-top: 15px;")
-        layout.addWidget(self.lbl_lang)
+        def create_section_header(text):
+            lbl = QLabel(text)
+            lbl.setStyleSheet(f"color: {self.accent_color}; font-size: 14px; font-weight: bold; margin-top: 15px; border-bottom: 1px solid #444; padding-bottom: 5px;")
+            return lbl
+
+        def create_form():
+            form = QFormLayout()
+            form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            form.setFormAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+            form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
+            form.setSpacing(15)
+            return form
+
+        checkbox_style = f"""
+            QCheckBox {{ color: white; }}
+            QCheckBox::indicator {{ width: 14px; height: 14px; border-radius: 3px; border: 1px solid #777; background: #222; }}
+            QCheckBox::indicator:hover {{ border: 1px solid #999; }}
+            QCheckBox::indicator:checked {{ background: {self.accent_color}; border: 1px solid {self.accent_color}; image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIzIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPjxwb2x5bGluZSBwb2ludHM9IjIwIDYgOSAxNyA0IDEyIj48L3BvbHlsaW5lPjwvc3ZnPg==); }}
+        """
+
+        combo_style = f"""
+            QComboBox {{
+                background-color: #2a2a2a;
+                color: #ffffff;
+                border: 1px solid #444444;
+                border-radius: 4px;
+                padding: 4px;
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: #2a2a2a;
+                color: #ffffff;
+                selection-background-color: {self.accent_color};
+            }}
+        """
+
+        # ==========================================
+        # SECTION: Appearance
+        # ==========================================
+        main_layout.addWidget(create_section_header(tr("Appearance")))
+        app_form = create_form()
         
+        # Language
         self.cb_lang = QComboBox()
-        self.cb_lang.setStyleSheet("QComboBox { background: #222; color: white; border-radius: 4px; padding: 5px; font-weight: bold; } QComboBox QAbstractItemView { background: #222; color: white; selection-background-color: " + self.accent_color + "; }")
+        self.cb_lang.setStyleSheet(combo_style)
         self.cb_lang.addItem("Português", "pt_BR")
         self.cb_lang.addItem("English", "en_US")
         
@@ -1786,59 +1844,15 @@ class EdgeDropShelf(QWidget):
             self.load_history()
             
         self.cb_lang.currentIndexChanged.connect(on_lang_changed)
-        layout.addWidget(self.cb_lang)
-        
-        checkbox_style = f"""
-            QCheckBox {{ color: white; }}
-            QCheckBox::indicator {{ width: 14px; height: 14px; border-radius: 3px; border: 1px solid #777; background: #222; }}
-            QCheckBox::indicator:hover {{ border: 1px solid #999; }}
-            QCheckBox::indicator:checked {{ background: {self.accent_color}; border: 1px solid {self.accent_color}; image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIzIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPjxwb2x5bGluZSBwb2ludHM9IjIwIDYgOSAxNyA0IDEyIj48L3BvbHlsaW5lPjwvc3ZnPg==); }}
-        """
-        
-        # Sound
-        self.cb_sound = QCheckBox(tr("Sound Effects"))
-        self.cb_sound.setStyleSheet(checkbox_style)
-        self.cb_sound.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.cb_sound.setChecked(self.config.get("sound_enabled"))
-        self.cb_sound.stateChanged.connect(lambda state: self.config.set("sound_enabled", bool(state)))
-        layout.addWidget(self.cb_sound)
-        
-        # Click to paste behavior config
-        self.lbl_click_behavior = QLabel(tr("Left-click behavior:"))
-        self.lbl_click_behavior.setStyleSheet("color: #cccccc; font-size: 13px; margin-top: 10px;")
-        layout.addWidget(self.lbl_click_behavior)
-        
-        self.click_behavior_cb = QComboBox()
-        self.click_behavior_cb.addItems([tr("Copy and Paste in Window"), tr("Copy Only")])
-        self.click_behavior_cb.setStyleSheet("""
-            QComboBox {
-                background-color: #2a2a2a;
-                color: #ffffff;
-                border: 1px solid #444444;
-                border-radius: 4px;
-                padding: 4px;
-            }
-            QComboBox QAbstractItemView {
-                background-color: #2a2a2a;
-                color: #ffffff;
-                selection-background-color: """ + self.accent_color + """;
-            }
-        """)
-        current_click_val = self.config.get("click_to_paste")
-        if current_click_val is None: current_click_val = True
-        self.click_behavior_cb.setCurrentIndex(0 if current_click_val else 1)
-        self.click_behavior_cb.currentIndexChanged.connect(lambda idx: self.config.set("click_to_paste", idx == 0))
-        layout.addWidget(self.click_behavior_cb)
+        lbl_lang = QLabel(tr("Language"))
+        lbl_lang.setStyleSheet("color: #cccccc;")
+        app_form.addRow(lbl_lang, self.cb_lang)
 
         # Accent Color
-        self.lbl_color = QLabel(tr("Accent Color"))
-        self.lbl_color.setStyleSheet("color: #aaaaaa; margin-top: 15px;")
-        layout.addWidget(self.lbl_color)
-        
         self.color_btn = QPushButton(self.accent_color)
         self.color_btn.setStyleSheet(f"background: {self.accent_color}; color: white; border-radius: 4px; padding: 5px; font-weight: bold;")
         self.color_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        
+        self.color_btn.setFixedWidth(100)
         def on_color_click():
             from PyQt6.QtWidgets import QColorDialog
             from PyQt6.QtGui import QColor
@@ -1847,28 +1861,25 @@ class EdgeDropShelf(QWidget):
                 self.config.set("accent_color", color.name())
                 self.accent_color = color.name()
                 self._apply_theme()
-                
         self.color_btn.clicked.connect(on_color_click)
-        layout.addWidget(self.color_btn)
+        lbl_color = QLabel(tr("Accent Color"))
+        lbl_color.setStyleSheet("color: #cccccc;")
+        app_form.addRow(lbl_color, self.color_btn)
 
         # Translucent Background
-        self.cb_translucent = QCheckBox(tr("Translucent Background"))
+        self.cb_translucent = QCheckBox()
         self.cb_translucent.setStyleSheet(checkbox_style)
         self.cb_translucent.setCursor(Qt.CursorShape.PointingHandCursor)
         self.cb_translucent.setChecked(self.config.get("translucent_background"))
-        
         def on_translucent_change(state):
             self.config.set("translucent_background", bool(state))
             self._update_app_stylesheet()
-            
         self.cb_translucent.stateChanged.connect(on_translucent_change)
-        layout.addWidget(self.cb_translucent)
-        
+        lbl_translucent = QLabel(tr("Translucent Background"))
+        lbl_translucent.setStyleSheet("color: #cccccc;")
+        app_form.addRow(lbl_translucent, self.cb_translucent)
+
         # Edge side
-        self.lbl_side = QLabel(tr("Edge Side"))
-        self.lbl_side.setStyleSheet("color: #aaaaaa; margin-top: 15px;")
-        layout.addWidget(self.lbl_side)
-        
         side_layout = QHBoxLayout()
         radio_style = f"""
             QRadioButton {{ color: white; }}
@@ -1876,7 +1887,6 @@ class EdgeDropShelf(QWidget):
             QRadioButton::indicator:checked {{ background: {self.accent_color}; border: 3px solid #222; }}
             QRadioButton::indicator:hover {{ border: 1px solid #999; }}
         """
-        
         self.rb_left = QRadioButton(tr("Left Edge"))
         self.rb_right = QRadioButton(tr("Right Edge"))
         self.rb_left.setStyleSheet(radio_style)
@@ -1900,39 +1910,120 @@ class EdgeDropShelf(QWidget):
             
         self.rb_left.toggled.connect(on_side_change)
         self.rb_right.toggled.connect(on_side_change)
-        
         side_layout.addWidget(self.rb_left)
         side_layout.addWidget(self.rb_right)
-        layout.addLayout(side_layout)
-        
-        # Sensitivity
-        self.lbl_sens = QLabel(tr("Trigger Area (pixels)"))
-        self.lbl_sens.setStyleSheet("color: #aaaaaa; margin-top: 15px;")
-        layout.addWidget(self.lbl_sens)
-        
+        lbl_side = QLabel(tr("Edge Side"))
+        lbl_side.setStyleSheet("color: #cccccc;")
+        app_form.addRow(lbl_side, side_layout)
+
+        # Shelf Width
+        slider_width = QSlider(Qt.Orientation.Horizontal)
+        slider_width.setRange(200, 600)
+        slider_width.setValue(self.config.get("shelf_width"))
+        slider_width.setCursor(Qt.CursorShape.PointingHandCursor)
+        slider_width.setTracking(False)
+        slider_width.setStyleSheet(f"QSlider::handle:horizontal {{ background: {self.accent_color}; border-radius: 5px; width: 10px; }}")
+        def on_width_moved(val):
+            from PyQt6.QtWidgets import QToolTip
+            from PyQt6.QtGui import QCursor
+            QToolTip.showText(QCursor.pos(), f"{val} px")
+            
+        def on_width_changed(val):
+            self.config.set("shelf_width", val)
+            self.shelf_width = val
+            self._calc_positions()
+            if self.is_open:
+                self.setGeometry(self.x_visible, self.y_pos, self.shelf_width, self.shelf_height)
+            self.update()
+            self.load_history()
+            
+        slider_width.sliderMoved.connect(on_width_moved)
+        slider_width.valueChanged.connect(on_width_changed)
+        lbl_width = QLabel(tr("Shelf Width (pixels)"))
+        lbl_width.setStyleSheet("color: #cccccc;")
+        app_form.addRow(lbl_width, slider_width)
+
+        main_layout.addLayout(app_form)
+
+        # ==========================================
+        # SECTION: Behavior
+        # ==========================================
+        main_layout.addWidget(create_section_header(tr("Behavior")))
+        beh_form = create_form()
+
+        # Click behavior
+        self.click_behavior_cb = QComboBox()
+        self.click_behavior_cb.addItems([tr("Copy and Paste in Window"), tr("Copy Only")])
+        self.click_behavior_cb.setStyleSheet(combo_style)
+        current_click_val = self.config.get("click_to_paste")
+        if current_click_val is None: current_click_val = True
+        self.click_behavior_cb.setCurrentIndex(0 if current_click_val else 1)
+        self.click_behavior_cb.currentIndexChanged.connect(lambda idx: self.config.set("click_to_paste", idx == 0))
+        lbl_click = QLabel(tr("Left-click behavior:"))
+        lbl_click.setStyleSheet("color: #cccccc;")
+        beh_form.addRow(lbl_click, self.click_behavior_cb)
+
+        # Sound
+        self.cb_sound = QCheckBox()
+        self.cb_sound.setStyleSheet(checkbox_style)
+        self.cb_sound.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.cb_sound.setChecked(self.config.get("sound_enabled"))
+        self.cb_sound.stateChanged.connect(lambda state: self.config.set("sound_enabled", bool(state)))
+        lbl_sound = QLabel(tr("Sound Effects"))
+        lbl_sound.setStyleSheet("color: #cccccc;")
+        beh_form.addRow(lbl_sound, self.cb_sound)
+
+        # Hotkey
+        self.hotkey_btn = QPushButton(self.config.get("hotkey"))
+        self.hotkey_btn.setToolTip(tr("Click to redefine hotkey"))
+        self.hotkey_btn.setStyleSheet("background: #222; color: white; border-radius: 4px; padding: 5px; font-weight: bold;")
+        self.hotkey_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.is_capturing = False
+        def on_hk_click():
+            self.is_capturing = True
+            self.hotkey_btn.setText(tr("Waiting for key..."))
+            self.hotkey_btn.setStyleSheet(f"background: {self.accent_color}; color: white; border-radius: 4px; padding: 5px; font-weight: bold;")
+            self.hotkey_btn.setFocus()
+        self.hotkey_btn.clicked.connect(on_hk_click)
+        lbl_hk = QLabel(tr("Global Hotkey (Click to capture)"))
+        lbl_hk.setStyleSheet("color: #cccccc;")
+        beh_form.addRow(lbl_hk, self.hotkey_btn)
+
+        main_layout.addLayout(beh_form)
+
+        # ==========================================
+        # SECTION: Edge Zone
+        # ==========================================
+        main_layout.addWidget(create_section_header(tr("Edge Zone")))
+        edge_form = create_form()
+
+        # Sensitivity / Width
         slider_sens = QSlider(Qt.Orientation.Horizontal)
         slider_sens.setRange(1, 20)
         slider_sens.setValue(self.config.get("trigger_width"))
         slider_sens.setCursor(Qt.CursorShape.PointingHandCursor)
         slider_sens.setStyleSheet(f"QSlider::handle:horizontal {{ background: {self.accent_color}; border-radius: 5px; width: 10px; }}")
         
-        def on_sens_changed(val):
-            self.config.set("trigger_width", val)
+        def _update_preview():
+            val = self.config.get("trigger_width")
             if not getattr(self, 'preview_win', None):
                 self.preview_win = QWidget()
                 self.preview_win.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool | Qt.WindowType.WindowTransparentForInput)
                 self.preview_win.setWindowOpacity(0.5)
                 self.preview_win.setStyleSheet(f"background-color: {self.accent_color};")
-            
             x = 0 if self.edge_side == "left" else self.screen_width - val
-            
-            # calculate height
             h_pct = self.config.get("trigger_height_percent", 50)
             area_height = int(self.screen_height * (h_pct / 100))
             y_pos = int((self.screen_height - area_height) / 2)
-            
             self.preview_win.setGeometry(x, y_pos, val, area_height)
             self.preview_win.show()
+
+        def on_sens_changed(val):
+            from PyQt6.QtWidgets import QToolTip
+            from PyQt6.QtGui import QCursor
+            QToolTip.showText(QCursor.pos(), f"{val} px")
+            self.config.set("trigger_width", val)
+            _update_preview()
             
         def on_sens_released():
             if getattr(self, 'preview_win', None):
@@ -1942,13 +2033,11 @@ class EdgeDropShelf(QWidget):
                 
         slider_sens.valueChanged.connect(on_sens_changed)
         slider_sens.sliderReleased.connect(on_sens_released)
-        layout.addWidget(slider_sens)
-        
+        lbl_sens = QLabel(tr("Trigger Area (pixels)"))
+        lbl_sens.setStyleSheet("color: #cccccc;")
+        edge_form.addRow(lbl_sens, slider_sens)
+
         # Sensitivity Height
-        self.lbl_sens_height = QLabel(tr("Trigger Height (%)"))
-        self.lbl_sens_height.setStyleSheet("color: #aaaaaa; margin-top: 15px;")
-        layout.addWidget(self.lbl_sens_height)
-        
         slider_height = QSlider(Qt.Orientation.Horizontal)
         slider_height.setRange(10, 100)
         slider_height.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -1956,80 +2045,46 @@ class EdgeDropShelf(QWidget):
         slider_height.setStyleSheet(f"QSlider::handle:horizontal {{ background: {self.accent_color}; border-radius: 5px; width: 10px; }}")
         
         def on_height_changed(val):
+            from PyQt6.QtWidgets import QToolTip
+            from PyQt6.QtGui import QCursor
+            QToolTip.showText(QCursor.pos(), f"{val}%")
             self.config.set("trigger_height_percent", val)
-            on_sens_changed(self.config.get("trigger_width"))
+            _update_preview()
             
         slider_height.valueChanged.connect(on_height_changed)
         slider_height.sliderReleased.connect(on_sens_released)
-        layout.addWidget(slider_height)
+        lbl_sens_height = QLabel(tr("Trigger Height (%)"))
+        lbl_sens_height.setStyleSheet("color: #cccccc;")
+        edge_form.addRow(lbl_sens_height, slider_height)
+
+        main_layout.addLayout(edge_form)
+
+        # ==========================================
+        # SECTION: System
+        # ==========================================
+        main_layout.addStretch()
+        main_layout.addWidget(create_section_header(tr("System")))
         
-        # Shelf Width
-        self.lbl_width = QLabel(tr("Shelf Width (pixels)"))
-        self.lbl_width.setStyleSheet("color: #aaaaaa; margin-top: 15px;")
-        layout.addWidget(self.lbl_width)
-        
-        slider_width = QSlider(Qt.Orientation.Horizontal)
-        slider_width.setRange(200, 600)
-        slider_width.setValue(self.config.get("shelf_width"))
-        slider_width.setCursor(Qt.CursorShape.PointingHandCursor)
-        slider_width.setTracking(False) # Only fire when user releases the slider
-        slider_width.setStyleSheet(f"QSlider::handle:horizontal {{ background: {self.accent_color}; border-radius: 5px; width: 10px; }}")
-        
-        def on_width_changed(val):
-            self.config.set("shelf_width", val)
-            self.shelf_width = val
-            self._calc_positions()
-            if self.is_open:
-                self.setGeometry(self.x_visible, self.y_pos, self.shelf_width, self.shelf_height)
-            self.update()
-            self.load_history() # reload cards to update their fixed width
-            
-        slider_width.valueChanged.connect(on_width_changed)
-        layout.addWidget(slider_width)
-        
-        # Hotkey
-        self.lbl_hk = QLabel(tr("Global Hotkey (Click to capture)"))
-        self.lbl_hk.setStyleSheet("color: #aaaaaa; margin-top: 15px;")
-        layout.addWidget(self.lbl_hk)
-        
-        self.hotkey_btn = QPushButton(self.config.get("hotkey"))
-        self.hotkey_btn.setToolTip(tr("Click to redefine hotkey"))
-        self.hotkey_btn.setStyleSheet("background: #222; color: white; border-radius: 4px; padding: 5px; font-weight: bold;")
-        self.hotkey_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.is_capturing = False
-        
-        def on_hk_click():
-            self.is_capturing = True
-            self.hotkey_btn.setText(tr("Waiting for key..."))
-            self.hotkey_btn.setStyleSheet(f"background: {self.accent_color}; color: white; border-radius: 4px; padding: 5px; font-weight: bold;")
-            self.hotkey_btn.setFocus()
-            
-        self.hotkey_btn.clicked.connect(on_hk_click)
-        layout.addWidget(self.hotkey_btn)
-        
-        layout.addStretch()
-        
-        # Actions
-        actions_layout = QHBoxLayout()
+        sys_layout = QHBoxLayout()
         self.restart_btn = QPushButton(tr("Restart Application"))
         self.restart_btn.setToolTip(tr("Restart Py-Drop"))
         self.restart_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.restart_btn.setStyleSheet("background: #222; color: #ff4444; border-radius: 4px; padding: 8px; font-weight: bold;")
+        self.restart_btn.setStyleSheet("background: #ff4444; color: white; border-radius: 4px; padding: 8px; font-weight: bold;")
         def on_restart():
             import sys, subprocess
             subprocess.Popen([sys.executable] + sys.argv)
             QApplication.quit()
         self.restart_btn.clicked.connect(on_restart)
-        actions_layout.addWidget(self.restart_btn)
+        sys_layout.addWidget(self.restart_btn)
         
         self.exit_btn = QPushButton(tr("Quit Application"))
         self.exit_btn.setToolTip(tr("Quit Py-Drop completely"))
         self.exit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.exit_btn.setStyleSheet("background: #222; color: #ff4444; border-radius: 4px; padding: 8px; font-weight: bold;")
+        self.exit_btn.setStyleSheet("background: #ff4444; color: white; border-radius: 4px; padding: 8px; font-weight: bold;")
         self.exit_btn.clicked.connect(QApplication.quit)
-        actions_layout.addWidget(self.exit_btn)
+        sys_layout.addWidget(self.exit_btn)
         
-        layout.addLayout(actions_layout)
+        main_layout.addLayout(sys_layout)
 
     def keyPressEvent(self, event: QKeyEvent):
         if self.is_capturing:
@@ -2157,7 +2212,7 @@ class EdgeDropShelf(QWidget):
             self.animation.setEndValue(QPoint(self.x_hidden, self.y_pos))
             self.animation.start()
 
-    def load_history(self):
+    def load_history(self, force_rebuild=False):
         history = self.clipboard_watcher.get_history()
         
         # 1. Identify which items to keep and which to delete
@@ -2175,7 +2230,7 @@ class EdgeDropShelf(QWidget):
                 continue
                 
             h_content_len = len(h_item.get("content")) if isinstance(h_item.get("content"), list) else 1
-            if w.render_timestamp != h_item.get("timestamp") or w.render_content_len != h_content_len or w.render_pinned != h_item.get("pinned") or w.render_type != h_item.get("type"):
+            if force_rebuild or w.render_timestamp != h_item.get("timestamp") or w.render_content_len != h_content_len or w.render_pinned != h_item.get("pinned") or w.render_type != h_item.get("type"):
                 w = self.item_widgets.pop(w_id)
                 w.setParent(None)
                 w.deleteLater()

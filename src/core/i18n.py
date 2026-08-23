@@ -54,7 +54,13 @@ _LANGUAGES = {
         "Yesterday": "Ontem",
         "Last 7 days": "Últimos 7 dias",
         "Last 30 days": "Últimos 30 dias",
-        "Loading preview...": "Carregando preview..."
+        "Loading preview...": "Carregando preview...",
+        "Appearance": "Aparência",
+        "Behavior": "Comportamento",
+        "Edge Zone": "Zona da Borda",
+        "System": "Sistema",
+        "Trigger Height (%)": "Altura de Ativação (%)",
+        "Link": "Link"
     },
     "en_US": {
         # Empty dict or maps to itself
