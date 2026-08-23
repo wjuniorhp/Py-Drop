@@ -382,6 +382,47 @@ class SubItemWidget(QFrame):
         self.actions_widget.hide()
         super().leaveEvent(event)
         
+
+    def _on_preview_ready(self, item_dict):
+        item_id = item_dict.get("item_id")
+        title = item_dict.get("title")
+        img_path = item_dict.get("image")
+        
+        if self.item_id != item_id:
+            return
+        
+        # In-place UI update
+        if title:
+            self.item["link_title"] = title
+            self.link_title_lbl.setText(title)
+        else:
+            self.link_title_lbl.setText("Link")
+            
+        if img_path and os.path.exists(img_path):
+            self.item["link_image"] = img_path
+            from PyQt6.QtGui import QPixmap
+            img = QPixmap(img_path)
+            if not img.isNull():
+                self.link_img_lbl = QLabel()
+                pixmap = img.scaled(64, 64, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
+                self.link_img_lbl.setPixmap(pixmap)
+                self.link_img_lbl.setFixedSize(64, 64)
+                self.link_img_lbl.setStyleSheet("border-radius: 8px; background-color: #2a2a2a;")
+                self.link_img_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.link_img_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+                
+                # Insert at the beginning of the horizontal layout
+                self.content_layout.itemAt(self.content_layout.count() - 1).layout().insertWidget(0, self.link_img_lbl)
+                
+        # Persist the fetched data to history via the watcher
+        shelf = self.window()
+        if hasattr(shelf, 'clipboard_watcher'):
+            shelf.clipboard_watcher.update_item(item_id, {
+                "link_title": title,
+                "link_image": img_path,
+                "preview_fetched": True
+            })
+
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self.drag_start_position = event.pos()
@@ -428,7 +469,7 @@ class SubItemWidget(QFrame):
         if hasattr(shelf, 'start_auto_scroll'):
             shelf.start_auto_scroll()
             
-        drag.exec(Qt.DropAction.CopyAction)
+        drag.exec(Qt.DropAction.CopyAction | Qt.DropAction.LinkAction | Qt.DropAction.MoveAction)
         
         if hasattr(shelf, 'stop_auto_scroll'):
             shelf.stop_auto_scroll()
@@ -554,6 +595,21 @@ class SelectableLabel(QLabel):
                 super().mouseReleaseEvent(event)
         else:
             super().mouseReleaseEvent(event)
+
+class TimeDividerWidget(QWidget):
+    def __init__(self, title, parent=None):
+        super().__init__(parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 5, 10, 5)
+        lbl = QLabel(title)
+        lbl.setStyleSheet("color: rgba(255, 255, 255, 100); font-size: 11px; font-weight: bold;")
+        lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        line = QFrame()
+        line.setFrameShape(QFrame.Shape.HLine)
+        line.setStyleSheet("border: 1px solid rgba(255, 255, 255, 30);")
+        line.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        layout.addWidget(lbl)
+        layout.addWidget(line, stretch=1)
 
 class ItemCard(QFrame):
     delete_clicked = pyqtSignal(str)
@@ -824,6 +880,56 @@ class ItemCard(QFrame):
             
             files_vlayout.addWidget(self.expanded_widget)
             content_layout.addLayout(files_vlayout)
+        elif item_type == "link":
+            link_hlayout = QHBoxLayout()
+            link_hlayout.setSpacing(10)
+            
+            self.link_text_vlayout = QVBoxLayout()
+            self.link_text_vlayout.setSpacing(4)
+            
+            title_text = item.get("link_title")
+            if not title_text:
+                title_text = tr("Carregando preview...") if not item.get("preview_fetched") else "Link"
+            
+            self.link_title_lbl = QLabel(title_text)
+            self.link_title_lbl.setWordWrap(True)
+            self.link_title_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            self.link_title_lbl.setStyleSheet("color: #ffffff; font-size: 14px; font-weight: bold; background: transparent;")
+            self.link_text_vlayout.addWidget(self.link_title_lbl)
+            
+            url_lbl = QLabel(content)
+            url_lbl.setWordWrap(True)
+            url_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            url_lbl.setStyleSheet("color: #4da6ff; font-size: 11px; background: transparent; text-decoration: underline;")
+            self.link_text_vlayout.addWidget(url_lbl)
+            self.link_text_vlayout.addStretch()
+            
+            link_hlayout.addLayout(self.link_text_vlayout, stretch=1)
+            
+            # Check if we already have an image
+            if item.get("link_image") and os.path.exists(item.get("link_image")):
+                from PyQt6.QtGui import QPixmap
+                img = QPixmap(item.get("link_image"))
+                if not img.isNull():
+                    self.link_img_lbl = QLabel()
+                    pixmap = img.scaled(64, 64, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
+                    self.link_img_lbl.setPixmap(pixmap)
+                    self.link_img_lbl.setFixedSize(64, 64)
+                    self.link_img_lbl.setStyleSheet("border-radius: 8px; background-color: #2a2a2a;")
+                    self.link_img_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                    self.link_img_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+                    link_hlayout.insertWidget(0, self.link_img_lbl)
+            
+            content_layout.addLayout(link_hlayout)
+            self.content_layout = content_layout
+            
+            if not item.get("link_title") and not item.get("preview_fetched"):
+                item["preview_fetched"] = True
+                from src.core.link_preview import LinkPreviewWorker
+                cache_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "cache")
+                self.worker = LinkPreviewWorker(content, self.item_id, cache_dir)
+                self.worker.preview_ready.connect(self._on_preview_ready)
+                self.worker.start()
         else:
             if parsed_color:
                 color_sq = QLabel()
@@ -1032,6 +1138,46 @@ class ItemCard(QFrame):
         else:
             event.ignore()
 
+    def _on_preview_ready(self, item_dict):
+        item_id = item_dict.get("item_id")
+        title = item_dict.get("title")
+        img_path = item_dict.get("image")
+        
+        if self.item_id != item_id:
+            return
+        
+        # In-place UI update
+        if title:
+            self.item["link_title"] = title
+            self.link_title_lbl.setText(title)
+        else:
+            self.link_title_lbl.setText("Link")
+            
+        if img_path and os.path.exists(img_path):
+            self.item["link_image"] = img_path
+            from PyQt6.QtGui import QPixmap
+            img = QPixmap(img_path)
+            if not img.isNull():
+                self.link_img_lbl = QLabel()
+                pixmap = img.scaled(64, 64, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
+                self.link_img_lbl.setPixmap(pixmap)
+                self.link_img_lbl.setFixedSize(64, 64)
+                self.link_img_lbl.setStyleSheet("border-radius: 8px; background-color: #2a2a2a;")
+                self.link_img_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.link_img_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+                
+                # Insert at the beginning of the horizontal layout
+                self.content_layout.itemAt(self.content_layout.count() - 1).layout().insertWidget(0, self.link_img_lbl)
+                
+        # Persist the fetched data to history via the watcher
+        shelf = self.window()
+        if hasattr(shelf, 'clipboard_watcher'):
+            shelf.clipboard_watcher.update_item(item_id, {
+                "link_title": title,
+                "link_image": img_path,
+                "preview_fetched": True
+            })
+
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self.drag_start_position = event.pos()
@@ -1109,7 +1255,7 @@ class ItemCard(QFrame):
         if hasattr(shelf, 'start_auto_scroll'):
             shelf.start_auto_scroll()
             
-        drag.exec(Qt.DropAction.CopyAction)
+        drag.exec(Qt.DropAction.CopyAction | Qt.DropAction.LinkAction | Qt.DropAction.MoveAction)
         
         if hasattr(shelf, 'stop_auto_scroll'):
             shelf.stop_auto_scroll()
@@ -1269,7 +1415,7 @@ class EdgeDropShelf(QWidget):
         self._setup_ui()
         self._update_app_stylesheet()
         self.load_history()
-        self.clipboard_watcher.new_item.connect(lambda item: self.add_clipboard_item(item, to_top=True))
+        self.clipboard_watcher.new_item.connect(lambda item: self.load_history())
         if hasattr(self.clipboard_watcher, 'history_changed'):
             self.clipboard_watcher.history_changed.connect(self.load_history)
 
@@ -1335,6 +1481,8 @@ class EdgeDropShelf(QWidget):
             self._on_search(self.search_input.text())
         else:
             self.empty_lbl.setText(tr("Shelf is empty."))
+            
+        self.load_history()
         
         # Overlay translates
         # self.stack_overlay translates dynamically on drag enter
@@ -1344,6 +1492,10 @@ class EdgeDropShelf(QWidget):
             self.lbl_settings_title.setText(tr("Configurações"))
             self.lbl_lang.setText(tr("Idioma"))
             self.cb_sound.setText(tr("Efeitos Sonoros"))
+            if hasattr(self, 'lbl_click_behavior'):
+                self.lbl_click_behavior.setText(tr("Comportamento do clique esquerdo:"))
+                self.click_behavior_cb.setItemText(0, tr("Copiar e Colar na Janela"))
+                self.click_behavior_cb.setItemText(1, tr("Apenas Copiar"))
             self.lbl_color.setText(tr("Cor Destaque"))
             self.cb_translucent.setText(tr("Fundo Translúcido"))
             self.lbl_side.setText(tr("Lado da Borda"))
@@ -1636,6 +1788,32 @@ class EdgeDropShelf(QWidget):
         self.cb_sound.stateChanged.connect(lambda state: self.config.set("sound_enabled", bool(state)))
         layout.addWidget(self.cb_sound)
         
+        # Click to paste behavior config
+        self.lbl_click_behavior = QLabel("Comportamento do clique esquerdo:")
+        self.lbl_click_behavior.setStyleSheet("color: #cccccc; font-size: 13px; margin-top: 10px;")
+        layout.addWidget(self.lbl_click_behavior)
+        
+        self.click_behavior_cb = QComboBox()
+        self.click_behavior_cb.addItems(["Copiar e Colar na Janela", "Apenas Copiar"])
+        self.click_behavior_cb.setStyleSheet("""
+            QComboBox {
+                background-color: #2a2a2a;
+                color: #ffffff;
+                border: 1px solid #444444;
+                border-radius: 4px;
+                padding: 4px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #2a2a2a;
+                color: #ffffff;
+                selection-background-color: """ + self.accent_color + """;
+            }
+        """)
+        current_click_val = self.config.get("click_to_paste")
+        if current_click_val is None: current_click_val = True
+        self.click_behavior_cb.setCurrentIndex(0 if current_click_val else 1)
+        self.click_behavior_cb.currentIndexChanged.connect(lambda idx: self.config.set("click_to_paste", idx == 0))
+        layout.addWidget(self.click_behavior_cb)
 
         # Accent Color
         self.lbl_color = QLabel(tr("Cor Destaque"))
@@ -1940,6 +2118,7 @@ class EdgeDropShelf(QWidget):
 
     def open_shelf(self):
         if not self.is_open:
+            self.show()
             for card in self.item_widgets.values():
                 if hasattr(card, 'check_validity'):
                     card.check_validity()
@@ -1966,14 +2145,36 @@ class EdgeDropShelf(QWidget):
             w.deleteLater()
         self.item_widgets.clear()
         
+        # Remove old dividers
+        for i in reversed(range(self.unpinned_layout.count())):
+            layout_item = self.unpinned_layout.itemAt(i)
+            if layout_item and layout_item.widget():
+                w = layout_item.widget()
+                if isinstance(w, TimeDividerWidget):
+                    w.setParent(None)
+                    w.deleteLater()
+        
         history = self.clipboard_watcher.get_history()
         
         has_pinned = False
+        from src.utils.helpers import get_time_group
+        current_group_id = None
         
-        for item in reversed(history):
-            self.add_clipboard_item(item, to_top=True)
+        # History is retrieved newest to oldest, so if we add sequentially to the bottom of the list, 
+        # it will be in the correct order: newest on top, oldest on bottom.
+        # But wait! If we append sequentially (to_top=False), it will be ordered correctly!
+        for item in history:
             if item.get("pinned"):
                 has_pinned = True
+                self.add_clipboard_item(item, to_top=False)
+            else:
+                grp_id, grp_name = get_time_group(item.get("timestamp"))
+                if grp_id != current_group_id:
+                    current_group_id = grp_id
+                    divider = TimeDividerWidget(grp_name)
+                    self.unpinned_layout.addWidget(divider)
+                    divider.show()
+                self.add_clipboard_item(item, to_top=False)
                 
         self.pinned_section.setVisible(has_pinned)
             
@@ -1987,6 +2188,38 @@ class EdgeDropShelf(QWidget):
         self.clipboard_watcher.remove_file_from_group(group_id, file_path, delete_physical=True)
         self.load_history()
 
+    def _simulate_ctrl_v(self):
+        import ctypes
+        VK_CONTROL = 0x11
+        VK_V = 0x56
+        KEYEVENTF_KEYUP = 0x0002
+        
+        # Press Ctrl
+        ctypes.windll.user32.keybd_event(VK_CONTROL, 0, 0, 0)
+        # Press V
+        ctypes.windll.user32.keybd_event(VK_V, 0, 0, 0)
+        # Release V
+        ctypes.windll.user32.keybd_event(VK_V, 0, KEYEVENTF_KEYUP, 0)
+        # Release Ctrl
+        ctypes.windll.user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
+
+    def _on_card_clicked_to_paste(self, item):
+        item_id = item.get("id")
+        self.clipboard_watcher.copy_to_clipboard(item)
+        click_to_paste = self.config.get("click_to_paste")
+        if click_to_paste is False:
+            return
+            
+        # To paste into the previous window, we MUST hide our window so Windows returns focus to it
+        self.hide()
+        self.is_open = False
+        self.animation.setStartValue(self.pos())
+        self.animation.setEndValue(QPoint(self.x_hidden, self.y_pos))
+        # Update internal position instantly
+        self.move(self.x_hidden, self.y_pos)
+        
+        QTimer.singleShot(100, self._simulate_ctrl_v)
+
     def add_clipboard_item(self, item, to_top=True):
         self.empty_lbl.hide()
         item_id = item.get("id")
@@ -1997,7 +2230,7 @@ class EdgeDropShelf(QWidget):
             w.deleteLater()
             
         card = ItemCard(item, self.shelf_width, self.audio, accent_color=self.accent_color)
-        card.copy_clicked.connect(self.clipboard_watcher.copy_to_clipboard)
+        card.copy_clicked.connect(self._on_card_clicked_to_paste)
         card.delete_clicked.connect(self.delete_item)
         card.delete_subitem_clicked.connect(self.delete_subitem)
         card.pin_clicked.connect(self.pin_item)
