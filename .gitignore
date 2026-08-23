@@ -184,3 +184,5 @@ cython_debug/
 data/
 scratch/
 .vscode/
+
+GEMINI.md

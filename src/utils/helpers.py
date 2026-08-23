@@ -69,13 +69,13 @@ def format_relative_time(timestamp):
         return ""
     diff = int(time.time() - timestamp)
     if diff < 60:
-        return tr("Agora mesmo")
+        return tr("Just now")
     elif diff < 3600:
-        return f"{tr('há ')}{diff // 60}{tr('m')}"
+        return tr("{}m ago").replace("{}", str(diff // 60))
     elif diff < 86400:
-        return f"{tr('há ')}{diff // 3600}{tr('h')}"
+        return tr("{}h ago").replace("{}", str(diff // 3600))
     else:
-        return f"{tr('há ')}{diff // 86400}{tr('d')}"
+        return tr("{}d ago").replace("{}", str(diff // 86400))
 
 import datetime
 def get_time_group(timestamp):
@@ -84,7 +84,7 @@ def get_time_group(timestamp):
     Retorna uma tupla (ordem, nome_traduzido).
     """
     if not timestamp:
-        return (99, tr("Antigos"))
+        return (99, tr("Older"))
         
     now = datetime.datetime.now()
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -95,15 +95,15 @@ def get_time_group(timestamp):
     days_diff = (today_start - item_start).days
     
     if days_diff == 0:
-        return (0, tr("Hoje"))
+        return (0, tr("Today"))
     elif days_diff == 1:
-        return (1, tr("Ontem"))
+        return (1, tr("Yesterday"))
     elif days_diff <= 7:
-        return (2, tr("Últimos 7 dias"))
+        return (2, tr("Last 7 days"))
     elif days_diff <= 30:
-        return (3, tr("Últimos 30 dias"))
+        return (3, tr("Last 30 days"))
     else:
-        return (4, tr("Antigos"))
+        return (4, tr("Older"))
 
 def set_click_through(hwnd, click_through=True):
     """Makes the window click-through (transparent to mouse events)."""
