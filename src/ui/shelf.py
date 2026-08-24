@@ -1196,6 +1196,61 @@ class ItemCard(QFrame):
                 "preview_fetched": True
             })
 
+    def enterEvent(self, event):
+        super().enterEvent(event)
+        # Pre-stage drag data to make drag start instantly
+        QTimer.singleShot(0, self._prestage_drag_data)
+
+    def _prestage_drag_data(self):
+        self._prestaged_mimedata = QMimeData()
+        content = self.item.get("content")
+        if isinstance(content, str): content = content.strip()
+        if self.item.get("type") == "files":
+            urls = [QUrl.fromLocalFile(p.strip()) for p in self.item.get("content", []) if os.path.exists(p.strip())]
+            self._prestaged_mimedata.setUrls(urls)
+        elif self.item.get("type") == "file" and os.path.exists(content):
+            url = QUrl.fromLocalFile(content)
+            self._prestaged_mimedata.setUrls([url])
+        elif self.item.get("type") == "image" and os.path.exists(content):
+            from PyQt6.QtGui import QImage
+            img = QImage(content)
+            if not img.isNull():
+                self._prestaged_mimedata.setImageData(img)
+            import struct
+            filename = os.path.basename(content)
+            if not filename.lower().endswith('.png'):
+                filename += '.png'
+            filename_encoded = filename.encode('utf-16-le')
+            filename_padded = filename_encoded + b'\x00' * (520 - len(filename_encoded))
+            try:
+                with open(content, 'rb') as f:
+                    file_bytes = f.read()
+                fgd = struct.pack('<I I 16s 8s 8s I 8s 8s 8s I I 520s',
+                                  1, 0, b'\x00'*16, b'\x00'*8, b'\x00'*8, 0x80,
+                                  b'\x00'*8, b'\x00'*8, b'\x00'*8, 0, len(file_bytes), filename_padded)
+                from PyQt6.QtCore import QByteArray
+                self._prestaged_mimedata.setData("FileGroupDescriptorW", QByteArray(fgd))
+                self._prestaged_mimedata.setData("FileContents", QByteArray(file_bytes))
+            except Exception as e:
+                pass
+        else:
+            self._prestaged_mimedata.setText(content)
+            self._prestaged_mimedata.setHtml(f"<html><body>{content}</body></html>")
+            
+        from PyQt6.QtCore import QByteArray
+        self._prestaged_mimedata.setData("edgedrop/internal-drag-item", QByteArray(self.item_id.encode('utf-8')))
+        
+        # Pre-stage pixmap
+        original_pixmap = self.grab()
+        from PyQt6.QtGui import QPixmap, QPainter
+        transparent_pixmap = QPixmap(original_pixmap.size())
+        transparent_pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(transparent_pixmap)
+        painter.setOpacity(0.6)
+        painter.drawPixmap(0, 0, original_pixmap)
+        painter.end()
+        self._prestaged_pixmap = transparent_pixmap
+
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self.drag_start_position = event.pos()
@@ -1209,62 +1264,19 @@ class ItemCard(QFrame):
         if getattr(self, "is_invalid", False):
             return
         drag = QDrag(self)
-        mimedata = QMimeData()
-        content = self.item.get("content")
-        if isinstance(content, str): content = content.strip()
-        if self.item.get("type") == "files":
-            urls = [QUrl.fromLocalFile(p.strip()) for p in self.item.get("content", []) if os.path.exists(p.strip())]
-            mimedata.setUrls(urls)
-        elif self.item.get("type") == "file" and os.path.exists(content):
-            url = QUrl.fromLocalFile(content)
-            mimedata.setUrls([url])
-        elif self.item.get("type") == "image" and os.path.exists(content):
-            from PyQt6.QtGui import QImage
-            img = QImage(content)
-                
-            if not img.isNull():
-                mimedata.setImageData(img)
-                
-            # Formato de Arquivo Virtual (FileGroupDescriptorW) nativo
-            import struct
-            filename = os.path.basename(content)
-            if not filename.lower().endswith('.png'):
-                filename += '.png'
-            filename_encoded = filename.encode('utf-16-le')
-            filename_padded = filename_encoded + b'\x00' * (520 - len(filename_encoded))
+        
+        # Build on demand if it wasn't prestaged (e.g. fast click before hover finished)
+        if getattr(self, "_prestaged_mimedata", None) is None:
+            self._prestage_drag_data()
             
-            try:
-                with open(content, 'rb') as f:
-                    file_bytes = f.read()
-                fgd = struct.pack('<I I 16s 8s 8s I 8s 8s 8s I I 520s',
-                                  1, 0, b'\x00'*16, b'\x00'*8, b'\x00'*8, 0x80,
-                                  b'\x00'*8, b'\x00'*8, b'\x00'*8, 0, len(file_bytes), filename_padded)
-                from PyQt6.QtCore import QByteArray
-                mimedata.setData("FileGroupDescriptorW", QByteArray(fgd))
-                mimedata.setData("FileContents", QByteArray(file_bytes))
-            except Exception as e:
-                pass
-        else:
-            mimedata.setText(content)
-            mimedata.setHtml(f"<html><body>{content}</body></html>")
-        drag.setMimeData(mimedata)
-        
-        from PyQt6.QtCore import QByteArray
-        mimedata.setData("edgedrop/internal-drag-item", QByteArray(self.item_id.encode('utf-8')))
-        
-        # Add visual preview of the dragged card
-        original_pixmap = self.grab()
-        from PyQt6.QtGui import QPixmap, QPainter
-        transparent_pixmap = QPixmap(original_pixmap.size())
-        transparent_pixmap.fill(Qt.GlobalColor.transparent)
-        
-        painter = QPainter(transparent_pixmap)
-        painter.setOpacity(0.6)  # 60% opacity
-        painter.drawPixmap(0, 0, original_pixmap)
-        painter.end()
-        
-        drag.setPixmap(transparent_pixmap)
+        drag.setMimeData(self._prestaged_mimedata)
+        drag.setPixmap(self._prestaged_pixmap)
         drag.setHotSpot(event.pos())
+        
+        # Clear references so C++ can take ownership safely
+        self._prestaged_mimedata = None
+        self._prestaged_pixmap = None
+        
         shelf = self.window()
         shelf.is_dragging = True
         shelf.active_drag_is_top_level = True
