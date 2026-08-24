@@ -126,16 +126,16 @@ class ClipboardWatcher(QObject):
         if item_type == "files" or isinstance(text, list):
             mime.setUrls([QUrl.fromLocalFile(p.strip()) for p in text if os.path.exists(p.strip())])
         else:
-            text = text.strip()
-            if os.path.exists(text):
-                mime.setUrls([QUrl.fromLocalFile(text)])
+            text_stripped = text.strip() if isinstance(text, str) else text
+            if isinstance(text, str) and os.path.exists(text_stripped):
+                mime.setUrls([QUrl.fromLocalFile(text_stripped)])
                 if item_type == "image":
                     from PyQt6.QtGui import QImage
-                    img = QImage(text)
+                    img = QImage(text_stripped)
                     if not img.isNull():
                         mime.setImageData(img)
             else:
-                mime.setText(text)
+                mime.setText(str(text))
             
         clipboard.blockSignals(True)
         clipboard.setMimeData(mime)
@@ -223,8 +223,10 @@ class ClipboardWatcher(QObject):
         
         if not current_list and not current_text:
             if mime.hasText():
-                current_text = mime.text().strip()
-                current_type = "text"
+                raw_text = mime.text()
+                if raw_text.strip():
+                    current_text = raw_text
+                    current_type = "text"
             elif mime.hasUrls() and mime.urls():
                 current_text = mime.urls()[0].toString()
                 current_type = "text"

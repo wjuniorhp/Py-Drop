@@ -1204,26 +1204,27 @@ class ItemCard(QFrame):
     def _prestage_drag_data(self):
         self._prestaged_mimedata = QMimeData()
         content = self.item.get("content")
-        if isinstance(content, str): content = content.strip()
+        content_stripped = content.strip() if isinstance(content, str) else content
+        
         if self.item.get("type") == "files":
             urls = [QUrl.fromLocalFile(p.strip()) for p in self.item.get("content", []) if os.path.exists(p.strip())]
             self._prestaged_mimedata.setUrls(urls)
-        elif self.item.get("type") == "file" and os.path.exists(content):
-            url = QUrl.fromLocalFile(content)
+        elif self.item.get("type") == "file" and os.path.exists(content_stripped):
+            url = QUrl.fromLocalFile(content_stripped)
             self._prestaged_mimedata.setUrls([url])
-        elif self.item.get("type") == "image" and os.path.exists(content):
+        elif self.item.get("type") == "image" and os.path.exists(content_stripped):
             from PyQt6.QtGui import QImage
-            img = QImage(content)
+            img = QImage(content_stripped)
             if not img.isNull():
                 self._prestaged_mimedata.setImageData(img)
             import struct
-            filename = os.path.basename(content)
+            filename = os.path.basename(content_stripped)
             if not filename.lower().endswith('.png'):
                 filename += '.png'
             filename_encoded = filename.encode('utf-16-le')
             filename_padded = filename_encoded + b'\x00' * (520 - len(filename_encoded))
             try:
-                with open(content, 'rb') as f:
+                with open(content_stripped, 'rb') as f:
                     file_bytes = f.read()
                 fgd = struct.pack('<I I 16s 8s 8s I 8s 8s 8s I I 520s',
                                   1, 0, b'\x00'*16, b'\x00'*8, b'\x00'*8, 0x80,
@@ -1234,7 +1235,7 @@ class ItemCard(QFrame):
             except Exception as e:
                 pass
         else:
-            self._prestaged_mimedata.setText(content)
+            self._prestaged_mimedata.setText(str(content))
             self._prestaged_mimedata.setHtml(f"<html><body>{content}</body></html>")
             
         from PyQt6.QtCore import QByteArray
