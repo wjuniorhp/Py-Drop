@@ -1,7 +1,7 @@
 from src.core.i18n import tr
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, 
-    QScrollArea, QFrame, QApplication, QStackedWidget, QSlider, QRadioButton, QCheckBox, QComboBox, QFormLayout
+    QScrollArea, QFrame, QApplication, QStackedWidget, QSlider, QRadioButton, QCheckBox, QComboBox, QFormLayout, QMenu
 )
 from PyQt6.QtCore import Qt, QPoint, QPropertyAnimation, QEasingCurve, QTimer, pyqtSignal, QMimeData, QUrl, QByteArray, QRect, QRectF
 from PyQt6.QtGui import QIcon, QFont, QCursor, QColor, QPainter, QDrag, QDesktopServices, QKeyEvent, QPainterPath
@@ -1852,26 +1852,69 @@ class EdgeDropShelf(QWidget):
         main_layout.addWidget(create_section_header(tr("Appearance")))
         app_form = create_form()
         
-        # Language
-        self.cb_lang = QComboBox()
-        self.cb_lang.setStyleSheet(combo_style)
-        self.cb_lang.addItem("Português", "pt_BR")
-        self.cb_lang.addItem("English", "en_US")
+        # Language (Using QPushButton + QMenu to fix Windows 10 popup bugs)
+        self.cb_lang = QPushButton()
+        self.cb_lang.setCursor(Qt.CursorShape.PointingHandCursor)
         
-        current_lang = self.config.get("language")
-        index = self.cb_lang.findData(current_lang)
-        if index >= 0:
-            self.cb_lang.setCurrentIndex(index)
+        btn_combo_style = f"""
+            QPushButton {{
+                background-color: #2a2a2a;
+                color: #ffffff;
+                border: 1px solid #444444;
+                border-radius: 4px;
+                padding: 4px;
+                text-align: left;
+            }}
+            QPushButton:hover {{
+                background-color: #333333;
+            }}
+            QPushButton::menu-indicator {{
+                image: none;
+            }}
+        """
+        self.cb_lang.setStyleSheet(btn_combo_style)
+        
+        self.lang_menu = QMenu(self.cb_lang)
+        self.lang_menu.setStyleSheet(f"""
+            QMenu {{
+                background-color: #2a2a2a;
+                color: #ffffff;
+                border: 1px solid #444444;
+            }}
+            QMenu::item {{
+                padding: 4px 24px 4px 8px;
+            }}
+            QMenu::item:selected {{
+                background-color: {self.accent_color};
+            }}
+        """)
+        
+        self.cb_lang.setMenu(self.lang_menu)
+        
+        # Add actions
+        act_pt = self.lang_menu.addAction("Português")
+        act_pt.setData("pt_BR")
+        act_en = self.lang_menu.addAction("English")
+        act_en.setData("en_US")
+        
+        current_lang = self.config.get("language", "pt_BR")
+        if current_lang == "en_US":
+            self.cb_lang.setText("English")
+        else:
+            self.cb_lang.setText("Português")
             
-        def on_lang_changed(idx):
-            lang_code = self.cb_lang.itemData(idx)
-            self.config.set("language", lang_code)
-            from src.core.i18n import set_language
-            set_language(lang_code)
-            self._retranslate_ui()
-            self.load_history()
-            
-        self.cb_lang.currentIndexChanged.connect(on_lang_changed)
+        def on_lang_action(action):
+            lang_code = action.data()
+            if self.config.get("language", "pt_BR") != lang_code:
+                self.config.set("language", lang_code)
+                self.cb_lang.setText(action.text())
+                from src.core.i18n import set_language
+                set_language(lang_code)
+                self._retranslate_ui()
+                self.load_history()
+                
+        self.lang_menu.triggered.connect(on_lang_action)
+        
         lbl_lang = QLabel(tr("Language"))
         lbl_lang.setStyleSheet("color: #cccccc;")
         app_form.addRow(lbl_lang, self.cb_lang)
@@ -1980,16 +2023,48 @@ class EdgeDropShelf(QWidget):
         beh_form = create_form()
 
         # Click behavior
-        self.click_behavior_cb = QComboBox()
-        self.click_behavior_cb.addItems([tr("Copy and Paste in Window"), tr("Copy Only")])
-        self.click_behavior_cb.setStyleSheet(combo_style)
-        current_click_val = self.config.get("click_to_paste")
-        if current_click_val is None: current_click_val = True
-        self.click_behavior_cb.setCurrentIndex(0 if current_click_val else 1)
-        self.click_behavior_cb.currentIndexChanged.connect(lambda idx: self.config.set("click_to_paste", idx == 0))
+        self.cb_click = QPushButton()
+        self.cb_click.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.cb_click.setStyleSheet(btn_combo_style)
+        
+        self.click_menu = QMenu(self.cb_click)
+        self.click_menu.setStyleSheet(f"""
+            QMenu {{
+                background-color: #2a2a2a;
+                color: #ffffff;
+                border: 1px solid #444444;
+            }}
+            QMenu::item {{
+                padding: 4px 24px 4px 8px;
+            }}
+            QMenu::item:selected {{
+                background-color: {self.accent_color};
+            }}
+        """)
+        self.cb_click.setMenu(self.click_menu)
+        
+        act_paste = self.click_menu.addAction(tr("Copy and Paste in Window"))
+        act_paste.setData(True)
+        act_copy = self.click_menu.addAction(tr("Copy Only"))
+        act_copy.setData(False)
+        
+        current_click_val = self.config.get("click_to_paste", True)
+        if current_click_val:
+            self.cb_click.setText(tr("Copy and Paste in Window"))
+        else:
+            self.cb_click.setText(tr("Copy Only"))
+            
+        def on_click_action(action):
+            val = action.data()
+            if self.config.get("click_to_paste", True) != val:
+                self.config.set("click_to_paste", val)
+                self.cb_click.setText(action.text())
+                
+        self.click_menu.triggered.connect(on_click_action)
+        
         lbl_click = QLabel(tr("Left-click behavior:"))
         lbl_click.setStyleSheet("color: #cccccc;")
-        beh_form.addRow(lbl_click, self.click_behavior_cb)
+        beh_form.addRow(lbl_click, self.cb_click)
 
         # Sound
         self.cb_sound = QCheckBox()
