@@ -1822,6 +1822,7 @@ class EdgeDropShelf(QWidget):
             form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             form.setFormAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
             form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
+            form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
             form.setSpacing(15)
             return form
 
@@ -1856,6 +1857,9 @@ class EdgeDropShelf(QWidget):
         # Language (Using QPushButton + QMenu to fix Windows 10 popup bugs)
         self.cb_lang = QPushButton()
         self.cb_lang.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.cb_lang.setMinimumWidth(100)
+        from PyQt6.QtWidgets import QSizePolicy
+        self.cb_lang.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         
         btn_combo_style = f"""
             QPushButton {{
@@ -1922,9 +1926,11 @@ class EdgeDropShelf(QWidget):
 
         # Accent Color
         self.color_btn = QPushButton(self.accent_color)
+        self.color_btn.setMinimumWidth(100)
+        from PyQt6.QtWidgets import QSizePolicy
+        self.color_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.color_btn.setStyleSheet(f"background: {self.accent_color}; color: white; border-radius: 4px; padding: 5px; font-weight: bold;")
         self.color_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.color_btn.setFixedWidth(100)
         def on_color_click():
             from PyQt6.QtWidgets import QColorDialog
             from PyQt6.QtGui import QColor
@@ -1952,7 +1958,7 @@ class EdgeDropShelf(QWidget):
         app_form.addRow(lbl_translucent, self.cb_translucent)
 
         # Edge side
-        side_layout = QHBoxLayout()
+        side_layout = QVBoxLayout()
         radio_style = f"""
             QRadioButton {{ color: white; }}
             QRadioButton::indicator {{ width: 14px; height: 14px; border-radius: 7px; border: 1px solid #777; background: #222; }}
@@ -1990,6 +1996,7 @@ class EdgeDropShelf(QWidget):
 
         # Shelf Width
         slider_width = QSlider(Qt.Orientation.Horizontal)
+        slider_width.setMinimumWidth(100)
         slider_width.setRange(200, 600)
         slider_width.setValue(self.config.get("shelf_width"))
         slider_width.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -2007,7 +2014,7 @@ class EdgeDropShelf(QWidget):
             if self.is_open:
                 self.setGeometry(self.x_visible, self.y_pos, self.shelf_width, self.shelf_height)
             self.update()
-            self.load_history()
+            self.load_history(force_rebuild=True)
             
         slider_width.sliderMoved.connect(on_width_moved)
         slider_width.valueChanged.connect(on_width_changed)
@@ -2026,6 +2033,9 @@ class EdgeDropShelf(QWidget):
         # Click behavior
         self.cb_click = QPushButton()
         self.cb_click.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.cb_click.setMinimumWidth(100)
+        from PyQt6.QtWidgets import QSizePolicy
+        self.cb_click.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.cb_click.setStyleSheet(btn_combo_style)
         
         self.click_menu = QMenu(self.cb_click)
@@ -2082,6 +2092,9 @@ class EdgeDropShelf(QWidget):
         self.hotkey_btn.setToolTip(tr("Click to redefine hotkey"))
         self.hotkey_btn.setStyleSheet("background: #222; color: white; border-radius: 4px; padding: 5px; font-weight: bold;")
         self.hotkey_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.hotkey_btn.setMinimumWidth(100)
+        from PyQt6.QtWidgets import QSizePolicy
+        self.hotkey_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.is_capturing = False
         def on_hk_click():
             self.is_capturing = True
@@ -2103,6 +2116,7 @@ class EdgeDropShelf(QWidget):
 
         # Sensitivity / Width
         slider_sens = QSlider(Qt.Orientation.Horizontal)
+        slider_sens.setMinimumWidth(100)
         slider_sens.setRange(1, 20)
         slider_sens.setValue(self.config.get("trigger_width"))
         slider_sens.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -2143,6 +2157,7 @@ class EdgeDropShelf(QWidget):
 
         # Sensitivity Height
         slider_height = QSlider(Qt.Orientation.Horizontal)
+        slider_height.setMinimumWidth(100)
         slider_height.setRange(10, 100)
         slider_height.setCursor(Qt.CursorShape.PointingHandCursor)
         slider_height.setValue(self.config.get("trigger_height_percent"))
@@ -2169,7 +2184,7 @@ class EdgeDropShelf(QWidget):
         main_layout.addStretch()
         main_layout.addWidget(create_section_header(tr("System")))
         
-        sys_layout = QHBoxLayout()
+        sys_layout = QVBoxLayout()
         self.restart_btn = QPushButton(tr("Restart Application"))
         self.restart_btn.setToolTip(tr("Restart Py-Drop"))
         self.restart_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -2189,9 +2204,25 @@ class EdgeDropShelf(QWidget):
         sys_layout.addWidget(self.exit_btn)
         
         main_layout.addLayout(sys_layout)
+        
+        # Ensure all labels wrap text to prevent horizontal overflow on narrow shelf widths
+        for lbl in container.findChildren(QLabel):
+            lbl.setWordWrap(True)
 
     def keyPressEvent(self, event: QKeyEvent):
-        if self.is_capturing:
+        if event.key() == Qt.Key.Key_Escape:
+            if getattr(self, "is_capturing", False):
+                self.is_capturing = False
+                hk_str = self.config.get("hotkey", "Alt+Shift+A")
+                self.hotkey_btn.setText(hk_str)
+                self.hotkey_btn.setStyleSheet("background: #222; color: white; border-radius: 4px; padding: 5px; font-weight: bold;")
+            elif self.is_settings_view:
+                self._toggle_settings()
+            else:
+                self.close_shelf()
+            return
+            
+        if getattr(self, "is_capturing", False):
             key = event.key()
             if key in (Qt.Key.Key_Shift, Qt.Key.Key_Control, Qt.Key.Key_Alt, Qt.Key.Key_Meta):
                 return

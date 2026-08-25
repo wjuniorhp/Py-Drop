@@ -11,7 +11,7 @@ DEFAULT_CONFIG = {
     "trigger_width": 5,
     "theme": "dark",
     "sound_enabled": False,
-    "hotkey": "Ctrl+Alt+V",
+    "hotkey": "Alt+Shift+A",
     "shelf_width": 340,
     "translucent_background": False,
     "accent_color": "#4CAF50",
