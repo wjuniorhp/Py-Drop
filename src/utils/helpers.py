@@ -18,15 +18,51 @@ class RECT(ctypes.Structure):
 
 def get_cursor_pos():
     """Returns the current (x, y) coordinates of the global cursor."""
-    pt = POINT()
-    user32.GetCursorPos(ctypes.byref(pt))
-    return (pt.x, pt.y)
+    from PyQt6.QtGui import QCursor
+    pos = QCursor.pos()
+    return (pos.x(), pos.y())
 
 def get_screen_size():
     """Returns the width and height of the primary monitor."""
+    from PyQt6.QtGui import QGuiApplication
+    app = QGuiApplication.instance()
+    if app and app.primaryScreen():
+        geom = app.primaryScreen().geometry()
+        return geom.width(), geom.height()
+    # Fallback to user32 if no QApplication is running
     width = user32.GetSystemMetrics(0) # SM_CXSCREEN
     height = user32.GetSystemMetrics(1) # SM_CYSCREEN
     return width, height
+
+def get_screen_geometry(cx, cy):
+    """Returns the geometry (name, x, y, w, h) of the monitor containing the point (cx, cy)."""
+    from PyQt6.QtGui import QGuiApplication
+    from PyQt6.QtCore import QPoint
+    screen = QGuiApplication.screenAt(QPoint(cx, cy))
+    if not screen:
+        # Find closest screen instead of defaulting to primary
+        screens = QGuiApplication.screens()
+        if screens:
+            pt = QPoint(cx, cy)
+            closest = screens[0]
+            min_dist = float('inf')
+            for s in screens:
+                rect = s.geometry()
+                # Calculate distance from point to rect
+                dx = max(rect.left() - pt.x(), 0, pt.x() - rect.right())
+                dy = max(rect.top() - pt.y(), 0, pt.y() - rect.bottom())
+                dist = dx*dx + dy*dy
+                if dist < min_dist:
+                    min_dist = dist
+                    closest = s
+            screen = closest
+        else:
+            screen = QGuiApplication.primaryScreen()
+    if screen:
+        geom = screen.geometry()
+        return (screen.name(), geom.x(), geom.y(), geom.width(), geom.height())
+    return ("default", 0, 0, *get_screen_size())
+
 
 def is_foreground_fullscreen():
     """Returns True if the current active foreground window is fullscreen."""

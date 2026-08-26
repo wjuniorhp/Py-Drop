@@ -33,6 +33,12 @@ def main():
         if shelf.is_open:
             shelf.close_shelf()
         else:
+            from src.utils.helpers import get_cursor_pos, get_screen_geometry
+            cx, cy = get_cursor_pos()
+            s_name, sx, sy, sw, sh = get_screen_geometry(cx, cy)
+            edge_sides = config.get("edge_sides", {})
+            edge_side = edge_sides.get(s_name, config.get("edge_side", "left"))
+            shelf.handle_edge_enter((s_name, sx, sy, sw, sh, edge_side))
             shelf.open_shelf()
             
     hotkey = GlobalHotkey()
@@ -46,7 +52,7 @@ def main():
 
     tracker.start()
     
-    shelf.show()
+    app.setQuitOnLastWindowClosed(False)
     
     sys.exit(app.exec())
 
