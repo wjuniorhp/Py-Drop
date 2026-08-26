@@ -1466,7 +1466,12 @@ class ShelfContainer(QWidget):
             path.lineTo(r, r)
             
         is_translucent = self.shelf.config.get("translucent_background")
-        bg_alpha = 180 if is_translucent else 255
+        if is_translucent:
+            opacity_pct = self.shelf.config.get("bg_opacity_percent", 70)
+            bg_alpha = int((opacity_pct / 100.0) * 255)
+        else:
+            bg_alpha = 255
+            
         painter.fillPath(path, QColor(0, 0, 0, bg_alpha))
         
         header_path = QPainterPath()
@@ -1497,7 +1502,6 @@ class EdgeDropShelf(QWidget):
         self.y_pos = self.screen_y + int((self.screen_height - self.shelf_height) / 2)
         self.edge_side = self.config.get("edge_side")
         self._calc_positions()
-        self.setGeometry(self.x_hidden, self.y_pos, self.shelf_width, self.shelf_height)
         self.is_open = False
         self.is_settings_view = False
         self.animation = QPropertyAnimation(self, b"pos")
@@ -1528,10 +1532,8 @@ class EdgeDropShelf(QWidget):
 
     def _calc_positions(self):
         if self.edge_side == "left":
-            self.x_hidden = self.screen_x - self.shelf_width
             self.x_visible = self.screen_x
         else:
-            self.x_hidden = self.screen_x + self.screen_width
             self.x_visible = self.screen_x + self.screen_width - self.shelf_width
             
     # paintEvent was moved to the container in _setup_ui
@@ -1828,10 +1830,8 @@ class EdgeDropShelf(QWidget):
         self.lbl_settings_title.setStyleSheet("color: white; font-size: 22px; font-weight: bold;")
         main_layout.addWidget(self.lbl_settings_title)
 
-        def create_section_header(text):
-            lbl = QLabel(text)
-            lbl.setStyleSheet(f"color: {self.accent_color}; font-size: 14px; font-weight: bold; margin-top: 15px; border-bottom: 1px solid #444; padding-bottom: 5px;")
-            return lbl
+        from src.ui.flow_layout import FlowLayout
+        from PyQt6.QtWidgets import QButtonGroup, QStackedWidget
 
         def create_form():
             form = QFormLayout()
@@ -1840,6 +1840,8 @@ class EdgeDropShelf(QWidget):
             form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
             form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
             form.setSpacing(15)
+            # Add some margin at the top so the form isn't flush with the tabs
+            form.setContentsMargins(0, 10, 0, 0)
             return form
 
         checkbox_style = f"""
@@ -1863,12 +1865,57 @@ class EdgeDropShelf(QWidget):
                 selection-background-color: {self.accent_color};
             }}
         """
+        
+        tab_style = f"""
+            QPushButton {{
+                background-color: transparent;
+                color: #aaa;
+                border: 1px solid #444;
+                border-radius: 12px;
+                padding: 4px 10px;
+                font-weight: bold;
+                font-size: 12px;
+            }}
+            QPushButton:hover {{
+                background-color: #333;
+                color: #fff;
+            }}
+            QPushButton:checked {{
+                background-color: {self.accent_color};
+                color: white;
+                border: 1px solid {self.accent_color};
+            }}
+        """
 
+        # Tabs Layout
+        tabs_layout = FlowLayout(margin=0, hSpacing=8, vSpacing=8)
+        main_layout.addLayout(tabs_layout)
+        
+        self.tab_group = QButtonGroup(container)
+        self.tab_group.setExclusive(True)
+        
+        self.settings_stacked = QStackedWidget()
+        main_layout.addWidget(self.settings_stacked)
+        
+        def add_tab(title, index, is_checked=False):
+            btn = QPushButton(title)
+            btn.setCheckable(True)
+            btn.setChecked(is_checked)
+            btn.setStyleSheet(tab_style)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            tabs_layout.addWidget(btn)
+            self.tab_group.addButton(btn, index)
+            return btn
+            
         # ==========================================
         # SECTION: Appearance
         # ==========================================
-        main_layout.addWidget(create_section_header(tr("Appearance")))
+        btn_appearance = add_tab(tr("Appearance"), 0, True)
+        
+        app_widget = QWidget()
         app_form = create_form()
+        app_widget.setLayout(app_form)
+        self.settings_stacked.addWidget(app_widget)
         
         # Language (Using QPushButton + QMenu to fix Windows 10 popup bugs)
         self.cb_lang = QPushButton()
@@ -1967,60 +2014,45 @@ class EdgeDropShelf(QWidget):
         self.cb_translucent.setChecked(self.config.get("translucent_background"))
         def on_translucent_change(state):
             self.config.set("translucent_background", bool(state))
+            update_opacity_visibility()
             self._update_app_stylesheet()
+            self.container.update()
         self.cb_translucent.stateChanged.connect(on_translucent_change)
         lbl_translucent = QLabel(tr("Translucent Background"))
         lbl_translucent.setStyleSheet("color: #cccccc;")
         app_form.addRow(lbl_translucent, self.cb_translucent)
 
-        # Edge side
-        side_layout = QVBoxLayout()
-        radio_style = f"""
-            QRadioButton {{ color: white; }}
-            QRadioButton::indicator {{ width: 14px; height: 14px; border-radius: 7px; border: 1px solid #777; background: #222; }}
-            QRadioButton::indicator:checked {{ background: {self.accent_color}; border: 3px solid #222; }}
-            QRadioButton::indicator:hover {{ border: 1px solid #999; }}
-        """
-        self.rb_left = QRadioButton(tr("Left Edge"))
-        self.rb_right = QRadioButton(tr("Right Edge"))
-        self.rb_left.setStyleSheet(radio_style)
-        self.rb_right.setStyleSheet(radio_style)
-        self.rb_left.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.rb_right.setCursor(Qt.CursorShape.PointingHandCursor)
+        # Background Opacity
+        self.slider_opacity = QSlider(Qt.Orientation.Horizontal)
+        self.slider_opacity.setMinimumWidth(100)
+        self.slider_opacity.setRange(10, 100)
+        self.slider_opacity.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.slider_opacity.setValue(self.config.get("bg_opacity_percent", 70))
+        self.slider_opacity.setStyleSheet(f"QSlider::handle:horizontal {{ background: {self.accent_color}; border-radius: 5px; width: 10px; }}")
         
-        edge_sides = self.config.get("edge_sides", {})
-        current_val = edge_sides.get(getattr(self, "current_screen_name", "default"), self.config.get("edge_side", "left"))
+        self.lbl_opacity = QLabel(tr("Background Opacity (%)"))
+        self.lbl_opacity.setStyleSheet("color: #cccccc;")
         
-        if current_val == "left":
-            self.rb_left.setChecked(True)
-        else:
-            self.rb_right.setChecked(True)
+        def on_opacity_moved(val):
+            from PyQt6.QtWidgets import QToolTip
+            from PyQt6.QtGui import QCursor
+            QToolTip.showText(QCursor.pos(), f"{val}%")
             
-        def on_side_change():
-            val = "left" if self.rb_left.isChecked() else "right"
-            s_name = getattr(self, "current_screen_name", "default")
-            edge_sides = dict(self.config.get("edge_sides", {}))
-            edge_sides[s_name] = val
-            self.config.set("edge_sides", edge_sides)
-            self.edge_side = val
-            self._calc_positions()
-            if self.is_open:
-                self.setFixedSize(self.shelf_width, self.shelf_height)
-                self.setGeometry(self.x_visible, self.y_pos, self.shelf_width, self.shelf_height)
-            self.update()
+        def on_opacity_changed(val):
+            self.config.set("bg_opacity_percent", val)
+            self.container.update()
             
-        self.rb_left.toggled.connect(on_side_change)
-        self.rb_right.toggled.connect(on_side_change)
-        side_layout.addWidget(self.rb_left)
-        side_layout.addWidget(self.rb_right)
+        self.slider_opacity.sliderMoved.connect(on_opacity_moved)
+        self.slider_opacity.valueChanged.connect(on_opacity_changed)
         
-        from PyQt6.QtGui import QGuiApplication
-        num_screens = len(QGuiApplication.screens())
-        lbl_text = tr("Lado da borda neste monitor") if num_screens > 1 else tr("Edge Side")
-        lbl_side = QLabel(lbl_text)
-        lbl_side.setWordWrap(True)
-        lbl_side.setStyleSheet("color: #cccccc;")
-        app_form.addRow(lbl_side, side_layout)
+        app_form.addRow(self.lbl_opacity, self.slider_opacity)
+        
+        def update_opacity_visibility():
+            is_checked = self.cb_translucent.isChecked()
+            self.slider_opacity.setVisible(is_checked)
+            self.lbl_opacity.setVisible(is_checked)
+            
+        update_opacity_visibility()
 
         # Shelf Width
         slider_width = QSlider(Qt.Orientation.Horizontal)
@@ -2052,13 +2084,14 @@ class EdgeDropShelf(QWidget):
         lbl_width.setStyleSheet("color: #cccccc;")
         app_form.addRow(lbl_width, slider_width)
 
-        main_layout.addLayout(app_form)
-
         # ==========================================
         # SECTION: Behavior
         # ==========================================
-        main_layout.addWidget(create_section_header(tr("Behavior")))
+        btn_behavior = add_tab(tr("Behavior"), 1)
+        beh_widget = QWidget()
         beh_form = create_form()
+        beh_widget.setLayout(beh_form)
+        self.settings_stacked.addWidget(beh_widget)
 
         # Click behavior
         self.cb_click = QPushButton()
@@ -2136,14 +2169,64 @@ class EdgeDropShelf(QWidget):
         lbl_hk.setStyleSheet("color: #cccccc;")
         beh_form.addRow(lbl_hk, self.hotkey_btn)
 
-        main_layout.addLayout(beh_form)
-
+        # ==========================================
         # ==========================================
         # SECTION: Edge Zone
         # ==========================================
-        main_layout.addWidget(create_section_header(tr("Edge Zone")))
+        btn_edge = add_tab(tr("Edge Zone"), 2)
+        edge_widget = QWidget()
         edge_form = create_form()
-
+        edge_widget.setLayout(edge_form)
+        self.settings_stacked.addWidget(edge_widget)
+        
+        # Edge side
+        side_layout = QVBoxLayout()
+        radio_style = f"""
+            QRadioButton {{ color: white; }}
+            QRadioButton::indicator {{ width: 14px; height: 14px; border-radius: 7px; border: 1px solid #777; background: #222; }}
+            QRadioButton::indicator:checked {{ background: {self.accent_color}; border: 3px solid #222; }}
+            QRadioButton::indicator:hover {{ border: 1px solid #999; }}
+        """
+        self.rb_left = QRadioButton(tr("Left Edge"))
+        self.rb_right = QRadioButton(tr("Right Edge"))
+        self.rb_left.setStyleSheet(radio_style)
+        self.rb_right.setStyleSheet(radio_style)
+        self.rb_left.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.rb_right.setCursor(Qt.CursorShape.PointingHandCursor)
+        
+        edge_sides = self.config.get("edge_sides", {})
+        current_val = edge_sides.get(getattr(self, "current_screen_name", "default"), self.config.get("edge_side", "left"))
+        
+        if current_val == "left":
+            self.rb_left.setChecked(True)
+        else:
+            self.rb_right.setChecked(True)
+            
+        def on_side_change():
+            val = "left" if self.rb_left.isChecked() else "right"
+            s_name = getattr(self, "current_screen_name", "default")
+            edge_sides = dict(self.config.get("edge_sides", {}))
+            edge_sides[s_name] = val
+            self.config.set("edge_sides", edge_sides)
+            self.edge_side = val
+            self._calc_positions()
+            if self.is_open:
+                self.setFixedSize(self.shelf_width, self.shelf_height)
+                self.setGeometry(self.x_visible, self.y_pos, self.shelf_width, self.shelf_height)
+            self.update()
+            
+        self.rb_left.toggled.connect(on_side_change)
+        self.rb_right.toggled.connect(on_side_change)
+        side_layout.addWidget(self.rb_left)
+        side_layout.addWidget(self.rb_right)
+        
+        from PyQt6.QtGui import QGuiApplication
+        num_screens = len(QGuiApplication.screens())
+        lbl_text = tr("Edge Side for this monitor") if num_screens > 1 else tr("Edge Side")
+        lbl_side = QLabel(lbl_text)
+        lbl_side.setWordWrap(True)
+        lbl_side.setStyleSheet("color: #cccccc;")
+        edge_form.addRow(lbl_side, side_layout)
         # Sensitivity / Width
         slider_sens = QSlider(Qt.Orientation.Horizontal)
         slider_sens.setMinimumWidth(100)
@@ -2206,19 +2289,19 @@ class EdgeDropShelf(QWidget):
         lbl_sens_height.setStyleSheet("color: #cccccc;")
         edge_form.addRow(lbl_sens_height, slider_height)
 
-        main_layout.addLayout(edge_form)
-
         # ==========================================
         # SECTION: System
         # ==========================================
-        main_layout.addStretch()
-        main_layout.addWidget(create_section_header(tr("System")))
-        
-        sys_layout = QVBoxLayout()
+        btn_system = add_tab(tr("System"), 3)
+        sys_widget = QWidget()
+        sys_layout = QVBoxLayout(sys_widget)
+        sys_layout.setContentsMargins(0, 10, 0, 0)
+        sys_layout.setSpacing(10)
+        self.settings_stacked.addWidget(sys_widget)
         self.restart_btn = QPushButton(tr("Restart Application"))
         self.restart_btn.setToolTip(tr("Restart Py-Drop"))
         self.restart_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.restart_btn.setStyleSheet("background: #ff4444; color: white; border-radius: 4px; padding: 8px; font-weight: bold;")
+        self.restart_btn.setStyleSheet("QPushButton { background-color: #ff4444; color: white; border-radius: 4px; padding: 8px; font-weight: bold; } QPushButton:hover { background-color: #ff6666; }")
         def on_restart():
             import sys, subprocess
             subprocess.Popen([sys.executable] + sys.argv)
@@ -2229,15 +2312,19 @@ class EdgeDropShelf(QWidget):
         self.exit_btn = QPushButton(tr("Quit Application"))
         self.exit_btn.setToolTip(tr("Quit Py-Drop completely"))
         self.exit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.exit_btn.setStyleSheet("background: #ff4444; color: white; border-radius: 4px; padding: 8px; font-weight: bold;")
+        self.exit_btn.setStyleSheet("QPushButton { background-color: #ff4444; color: white; border-radius: 4px; padding: 8px; font-weight: bold; } QPushButton:hover { background-color: #ff6666; }")
         self.exit_btn.clicked.connect(QApplication.quit)
         sys_layout.addWidget(self.exit_btn)
-        
-        main_layout.addLayout(sys_layout)
+        sys_layout.addStretch()
         
         # Ensure all labels wrap text to prevent horizontal overflow on narrow shelf widths
         for lbl in container.findChildren(QLabel):
             lbl.setWordWrap(True)
+            
+        def on_tab_clicked(id):
+            self.settings_stacked.setCurrentIndex(id)
+            
+        self.tab_group.idClicked.connect(on_tab_clicked)
 
     def keyPressEvent(self, event: QKeyEvent):
         if event.key() == Qt.Key.Key_Escape:
@@ -2313,6 +2400,10 @@ class EdgeDropShelf(QWidget):
         text = text.lower()
         visible = 0
         for item_id, card in self.item_widgets.items():
+            if text and card.render_type == "image":
+                card.hide()
+                continue
+                
             search_target = " ".join(card.full_content).lower() if isinstance(card.full_content, list) else card.full_content.lower()
             if text in search_target:
                 card.show()
@@ -2343,7 +2434,6 @@ class EdgeDropShelf(QWidget):
                 self.y_pos = self.screen_y + int((self.screen_height - self.shelf_height) / 2)
                 self._calc_positions()
                 self.setFixedSize(self.shelf_width, self.shelf_height)
-                self.setGeometry(self.x_hidden, self.y_pos, self.shelf_width, self.shelf_height)
                 self.load_history(force_rebuild=True)
             
         self.open_shelf()
@@ -2385,17 +2475,6 @@ class EdgeDropShelf(QWidget):
         
         is_inside = is_inside_buffer
         
-        if not is_inside:
-            # Check mixed-DPI multi-monitor boundary jump
-            s_name, sx, sy, sw, sh = utils.get_screen_geometry(cx, cy)
-            if s_name != getattr(self, "current_screen_name", ""):
-                if self.edge_side == "left" and cx >= sx + sw - buffer - 50:
-                    is_inside = True
-                elif self.edge_side == "right" and cx <= sx + buffer + 50:
-                    is_inside = True
-
-
-
         if not is_inside:
             self.close_shelf()
         elif not is_inside_strict and self.is_open:
@@ -2552,10 +2631,8 @@ class EdgeDropShelf(QWidget):
         # To paste into the previous window, we MUST hide our window so Windows returns focus to it
         self.hide()
         self.is_open = False
-        self.animation.setStartValue(self.pos())
-        self.animation.setEndValue(QPoint(self.x_hidden, self.y_pos))
-        # Update internal position instantly
-        self.move(self.x_hidden, self.y_pos)
+        end_x = self.shelf_width if self.edge_side == "right" else -self.shelf_width
+        self.container.move(end_x, 0)
         
         QTimer.singleShot(100, self._simulate_ctrl_v)
 
