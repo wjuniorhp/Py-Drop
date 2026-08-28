@@ -1028,7 +1028,7 @@ class ItemCard(QFrame):
             else:
                 if hasattr(self, 'icon_widget'): self.icon_widget.set_invalid(False)
         elif item_type == "files":
-            missing = any(not os.path.exists(p) for p in content)
+            missing = any(not os.path.exists(p) for p in content[:3])
             if missing:
                 self.is_invalid = True
                 if hasattr(self, 'title_lbl'): self.title_lbl.setStyleSheet("color: #666666; font-size: 14px; font-weight: bold; background: transparent; text-decoration: line-through;")
@@ -2514,10 +2514,14 @@ class EdgeDropShelf(QWidget):
             self.activateWindow()
             self.setFocus()
             
-            for card in self.item_widgets.values():
-                if hasattr(card, 'check_validity'):
-                    card.check_validity()
-                    
+            def run_checks():
+                for card in self.item_widgets.values():
+                    if hasattr(card, 'check_validity'):
+                        card.check_validity()
+            
+            # Defer the checks until after the slide animation finishes (400ms)
+            QTimer.singleShot(400, run_checks)
+            
             self.is_open = True
             if self.audio: self.audio.play_toggle()
             
