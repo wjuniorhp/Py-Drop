@@ -2646,31 +2646,165 @@ class EdgeDropShelf(QWidget):
         # Release Ctrl
         ctypes.windll.user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
 
+    def _animate_move_to_top(self, card, moved_item, on_complete=None):
+        layout = self.pinned_section.body_layout if moved_item.get("pinned") else self.unpinned_layout
+        current_idx = layout.indexOf(card)
+        
+        target_idx = 0
+        temp_divider = None
+        if not moved_item.get("pinned"):
+            from src.utils.helpers import get_time_group
+            import time
+            grp_id, grp_name = get_time_group(time.time())
+            
+            has_hoje = False
+            if layout.count() > 0:
+                from src.ui.shelf import TimeDividerWidget
+                first_item = layout.itemAt(0).widget()
+                if isinstance(first_item, TimeDividerWidget):
+                    lbl = first_item.findChild(QLabel)
+                    if lbl and lbl.text() == grp_name:
+                        has_hoje = True
+                        
+            if has_hoje:
+                target_idx = 1
+            else:
+                from src.ui.shelf import TimeDividerWidget
+                temp_divider = TimeDividerWidget(grp_name)
+                layout.insertWidget(0, temp_divider)
+                temp_divider.show()
+                target_idx = 1
+                # current_idx shifts down by 1 because we inserted before it
+                current_idx += 1
+
+        if current_idx <= target_idx:
+            # Já está no topo
+            if temp_divider:
+                temp_divider.deleteLater()
+            card.item = moved_item
+            card.render_timestamp = moved_item.get("timestamp")
+            card.update_timestamp()
+            self.load_history()
+            if on_complete: on_complete()
+            return
+            
+        pixmap = card.grab()
+        scroll_widget = self.scroll.widget()
+        start_pos = card.mapTo(scroll_widget, QPoint(0, 0))
+        
+        flying = QLabel(scroll_widget)
+        flying.setPixmap(pixmap)
+        flying.move(start_pos)
+        flying.resize(card.size())
+        flying.show()
+        flying.raise_()
+        
+        dummy_expand = QWidget()
+        dummy_expand.setMinimumHeight(0)
+        dummy_expand.setMaximumHeight(0)
+        
+        dummy_shrink = QWidget()
+        dummy_shrink.setMinimumHeight(0)
+        dummy_shrink.setMaximumHeight(card.height())
+        
+        layout.insertWidget(current_idx, dummy_shrink)
+        dummy_shrink.show()
+        card.hide()
+        layout.insertWidget(target_idx, dummy_expand)
+        dummy_expand.show()
+        
+        layout.invalidate()
+        scroll_widget.layout().activate()
+        target_pos = dummy_expand.mapTo(scroll_widget, QPoint(0, 0))
+        
+        from PyQt6.QtCore import QParallelAnimationGroup, QPropertyAnimation, QEasingCurve
+        self._move_anim_group = QParallelAnimationGroup(self)
+        
+        anim_move = QPropertyAnimation(flying, b"pos")
+        anim_move.setStartValue(start_pos)
+        anim_move.setEndValue(target_pos)
+        anim_move.setDuration(400)
+        anim_move.setEasingCurve(QEasingCurve.Type.OutCubic)
+        
+        anim_shrink = QPropertyAnimation(dummy_shrink, b"maximumHeight")
+        anim_shrink.setStartValue(card.height())
+        anim_shrink.setEndValue(0)
+        anim_shrink.setDuration(400)
+        anim_shrink.setEasingCurve(QEasingCurve.Type.OutCubic)
+        
+        anim_expand = QPropertyAnimation(dummy_expand, b"maximumHeight")
+        anim_expand.setStartValue(0)
+        anim_expand.setEndValue(card.height())
+        anim_expand.setDuration(400)
+        anim_expand.setEasingCurve(QEasingCurve.Type.OutCubic)
+        
+        target_scroll = 0
+        if not moved_item.get("pinned"):
+            divider = layout.itemAt(0).widget()
+            if divider:
+                target_scroll = divider.mapTo(scroll_widget, QPoint(0, 0)).y()
+                
+        scroll_bar = self.scroll.verticalScrollBar()
+        current_scroll = scroll_bar.value()
+        viewport_height = self.scroll.viewport().height()
+        
+        final_scroll = current_scroll
+        if target_scroll < current_scroll:
+            final_scroll = target_scroll
+        elif target_scroll + card.height() + 50 > current_scroll + viewport_height:
+            final_scroll = target_scroll
+            
+        final_scroll = max(0, min(final_scroll, scroll_bar.maximum()))
+        
+        anim_scroll = QPropertyAnimation(scroll_bar, b"value")
+        anim_scroll.setStartValue(scroll_bar.value())
+        anim_scroll.setEndValue(final_scroll)
+        anim_scroll.setDuration(400)
+        anim_scroll.setEasingCurve(QEasingCurve.Type.OutCubic)
+        
+        self._move_anim_group.addAnimation(anim_move)
+        self._move_anim_group.addAnimation(anim_shrink)
+        self._move_anim_group.addAnimation(anim_expand)
+        self._move_anim_group.addAnimation(anim_scroll)
+        
+        def on_finish():
+            flying.deleteLater()
+            dummy_shrink.deleteLater()
+            dummy_expand.deleteLater()
+            if temp_divider:
+                temp_divider.deleteLater()
+            card.item = moved_item
+            card.render_timestamp = moved_item.get("timestamp")
+            card.update_timestamp()
+            self.load_history()
+            if on_complete: on_complete()
+            
+        self._move_anim_group.finished.connect(on_finish)
+        self._move_anim_group.start()
+
     def _on_card_clicked_to_paste(self, item):
         item_id = item.get("id")
         self.clipboard_watcher.copy_to_clipboard(item)
+        
+        def do_paste():
+            click_to_paste = self.config.get("click_to_paste")
+            if click_to_paste is False:
+                return
+            self.hide()
+            self.is_open = False
+            end_x = self.shelf_width if self.edge_side == "right" else -self.shelf_width
+            self.container.move(end_x, 0)
+            QTimer.singleShot(100, self._simulate_ctrl_v)
         
         if self.config.get("move_to_top_on_click", True):
             moved_item = self.clipboard_watcher.move_to_top(item_id)
             if moved_item:
                 card = self.item_widgets.get(item_id)
                 if card:
-                    card.item = moved_item
-                    card.render_timestamp = moved_item.get("timestamp")
-                    card.update_timestamp()
-                self.load_history()
+                    self._animate_move_to_top(card, moved_item, on_complete=do_paste)
+                    return
                         
-        click_to_paste = self.config.get("click_to_paste")
-        if click_to_paste is False:
-            return
-            
-        # To paste into the previous window, we MUST hide our window so Windows returns focus to it
-        self.hide()
-        self.is_open = False
-        end_x = self.shelf_width if self.edge_side == "right" else -self.shelf_width
-        self.container.move(end_x, 0)
-        
-        QTimer.singleShot(100, self._simulate_ctrl_v)
+        do_paste()
 
     def add_clipboard_item(self, item, to_top=True):
         self.empty_lbl.hide()
