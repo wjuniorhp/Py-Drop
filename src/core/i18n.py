@@ -2,6 +2,7 @@ import os
 
 _LANGUAGES = {
     "pt_BR": {
+        "History Limit": "Limite do Histórico",
         "The shelf is empty.": "A prateleira está vazia.",
         "Just now": "Agora mesmo",
         "{}m ago": "há {}m",

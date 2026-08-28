@@ -611,6 +611,26 @@ class TimeDividerWidget(QWidget):
         layout.addWidget(lbl)
         layout.addWidget(line, stretch=1)
 
+from PyQt6.QtCore import QRunnable, QObject, pyqtSignal
+
+class ImageLoaderWorkerSignals(QObject):
+    finished = pyqtSignal(object) # QImage
+
+class ImageLoaderWorker(QRunnable):
+    def __init__(self, path, target_width, target_height):
+        super().__init__()
+        self.path = path
+        self.target_width = target_width
+        self.target_height = target_height
+        self.signals = ImageLoaderWorkerSignals()
+        
+    def run(self):
+        from PyQt6.QtGui import QImage
+        img = QImage(self.path)
+        if not img.isNull():
+            img = img.scaled(self.target_width, self.target_height, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        self.signals.finished.emit(img)
+
 class ItemCard(QFrame):
     delete_clicked = pyqtSignal(str)
     pin_clicked = pyqtSignal(str)
@@ -796,16 +816,22 @@ class ItemCard(QFrame):
             content_layout.addLayout(file_vlayout)
         elif item_type == "image":
             img_vlayout = QVBoxLayout()
-            from PyQt6.QtGui import QPixmap
-            img = QPixmap(content)
             self.icon_widget = InvalidableLabel()
-            if not img.isNull():
-                pixmap = img.scaled(self.shelf_width - 80, 120, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-                self.icon_widget.setPixmap(pixmap)
-            else:
-                self.icon_widget.setFixedSize(self.shelf_width - 80, 120)
+            self.icon_widget.setFixedSize(self.shelf_width - 80, 120)
             self.icon_widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.icon_widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            # Use placeholder color
+            self.icon_widget.setStyleSheet("background-color: #2a2a2a; border-radius: 5px;")
+            
+            from PyQt6.QtCore import QThreadPool
+            from PyQt6.QtGui import QPixmap
+            worker = ImageLoaderWorker(content, self.shelf_width - 80, 120)
+            def on_image_loaded(img):
+                if not img.isNull():
+                    self.icon_widget.setPixmap(QPixmap.fromImage(img))
+                    self.icon_widget.setStyleSheet("")
+            worker.signals.finished.connect(on_image_loaded)
+            QThreadPool.globalInstance().start(worker)
             img_vlayout.addWidget(self.icon_widget)
             content_layout.addLayout(img_vlayout)
         elif item_type == "files":
@@ -1516,6 +1542,7 @@ class EdgeDropShelf(QWidget):
         self.shelf_height = int(self.screen_height * 0.8)
         self.y_pos = self.screen_y + int((self.screen_height - self.shelf_height) / 2)
         self.edge_side = self.config.get("edge_side")
+        self.display_limit = 30
         self._calc_positions()
         self.is_open = False
         self.is_settings_view = False
@@ -1642,6 +1669,19 @@ class EdgeDropShelf(QWidget):
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        
+        self._is_loading_more = False
+        def on_scroll_moved(val):
+            if self._is_loading_more: return
+            sb = self.scroll.verticalScrollBar()
+            if sb.maximum() > 0 and val >= sb.maximum() * 0.8:
+                if self.display_limit < len(self.clipboard_watcher.history):
+                    self._is_loading_more = True
+                    self.display_limit += 30
+                    self.load_history(force_rebuild=False)
+                    self._is_loading_more = False
+        
+        self.scroll.verticalScrollBar().valueChanged.connect(on_scroll_moved)
         self.scroll.setStyleSheet("""
             QScrollArea { 
                 border: none; 
@@ -2107,6 +2147,34 @@ class EdgeDropShelf(QWidget):
         beh_form = create_form()
         beh_widget.setLayout(beh_form)
         self.settings_stacked.addWidget(beh_widget)
+
+        # Max history items
+        slider_history = QSlider(Qt.Orientation.Horizontal)
+        slider_history.setMinimumWidth(100)
+        # Using 1 to 10 for physical snapping (1=50, 2=100... 10=500)
+        slider_history.setRange(1, 10)
+        slider_history.setSingleStep(1)
+        current_history_limit = self.config.get("max_history_items", 100)
+        slider_history.setValue(current_history_limit // 50)
+        slider_history.setCursor(Qt.CursorShape.PointingHandCursor)
+        slider_history.setTracking(False)
+        slider_history.setStyleSheet(f"QSlider::handle:horizontal {{ background: {self.accent_color}; border-radius: 5px; width: 10px; }}")
+        
+        def on_history_moved(val):
+            real_val = val * 50
+            from PyQt6.QtWidgets import QToolTip
+            from PyQt6.QtGui import QCursor
+            QToolTip.showText(QCursor.pos(), str(real_val))
+            
+        def on_history_changed(val):
+            real_val = val * 50
+            self.config.set("max_history_items", real_val)
+            
+        slider_history.sliderMoved.connect(on_history_moved)
+        slider_history.valueChanged.connect(on_history_changed)
+        lbl_history = QLabel(tr("History Limit"))
+        lbl_history.setStyleSheet("color: #cccccc;")
+        beh_form.addRow(lbl_history, slider_history)
 
         # Click behavior
         self.cb_click = QPushButton()
@@ -2597,7 +2665,7 @@ class EdgeDropShelf(QWidget):
         from src.utils.helpers import get_time_group
         current_group_id = None
         
-        for item in history:
+        for item in history[:self.display_limit]:
             item_id = item.get("id")
             is_pinned = item.get("pinned")
             

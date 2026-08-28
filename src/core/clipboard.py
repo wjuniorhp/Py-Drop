@@ -170,8 +170,23 @@ class ClipboardWatcher(QObject):
             import time
             images_dir = self.storage.filepath.parent / "images"
             images_dir.mkdir(exist_ok=True)
-            img_path = images_dir / f"image_{int(time.time()*1000)}.png"
-            if img.save(str(img_path), "PNG"):
+            
+            formats = mime.formats()
+            if "image/png" in formats:
+                ext = "png"
+                save_fmt = "PNG"
+                quality = -1
+            elif "image/webp" in formats:
+                ext = "webp"
+                save_fmt = "WEBP"
+                quality = -1
+            else:
+                ext = "jpg"
+                save_fmt = "JPEG"
+                quality = 95
+                
+            img_path = images_dir / f"image_{int(time.time()*1000)}.{ext}"
+            if img.save(str(img_path), save_fmt, quality):
                 return str(img_path)
         return None
 
@@ -305,7 +320,8 @@ class ClipboardWatcher(QObject):
         self.history.insert(0, item)
         
         unpinned = [x for x in self.history if not x.get("pinned")]
-        if len(self.history) > 50 and unpinned:
+        max_items = self.config.get("max_history_items", 100)
+        if len(self.history) > max_items and unpinned:
             oldest_unpinned = unpinned[-1]
             self._delete_physical_file(oldest_unpinned)
             self.history.remove(oldest_unpinned)
