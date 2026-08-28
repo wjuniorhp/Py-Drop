@@ -313,6 +313,17 @@ class ClipboardWatcher(QObject):
         self.storage.save(self.history)
         self.new_item.emit(item)
             
+    def move_to_top(self, item_id):
+        import time
+        for i, item in enumerate(self.history):
+            if item.get("id") == item_id:
+                item["timestamp"] = time.time()
+                self.history.pop(i)
+                self.history.insert(0, item)
+                self.storage.save(self.history)
+                return item
+        return None
+
     def remove_item(self, item_id):
         for x in self.history:
             if x.get("id") == item_id:

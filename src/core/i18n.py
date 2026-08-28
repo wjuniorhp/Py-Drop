@@ -62,7 +62,8 @@ _LANGUAGES = {
         "Edge Zone": "Zona da Borda",
         "System": "Sistema",
         "Trigger Height (%)": "Altura de Ativação (%)",
-        "Link": "Link"
+        "Link": "Link",
+        "Move clicked item to top": "Mover item clicado para o topo"
     },
     "en_US": {
         # Empty dict or maps to itself

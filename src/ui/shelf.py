@@ -1332,15 +1332,18 @@ class ItemCard(QFrame):
                     return
                     
             if hasattr(self, 'expanded_widget'):
-                is_expanded = self.expanded_widget.maximumHeight() > 0
+                if not hasattr(self, '_is_expanded'):
+                    self._is_expanded = False
                 
-                if not is_expanded:
-                    sum_target = self.summary_body_widget.sizeHint().height()
+                if not self._is_expanded:
+                    self._is_expanded = True
+                    sum_target = self.summary_body_widget.size()
+                    sum_height = sum_target.height() if sum_target.height() > 0 else self.summary_body_widget.sizeHint().height()
                     self.summary_body_widget.setVisible(False)
                     self.expanded_widget.setVisible(True)
                     exp_target = self.expanded_widget.sizeHint().height()
                     
-                    self.expand_anim.setStartValue(sum_target)
+                    self.expand_anim.setStartValue(sum_height)
                     self.expand_anim.setEndValue(exp_target)
                     
                     self.expand_anim.start()
@@ -1352,8 +1355,19 @@ class ItemCard(QFrame):
                     self.expand_anim.finished.connect(on_expand_finish)
                     
                 else:
-                    exp_target = self.expanded_widget.sizeHint().height()
+                    self._is_expanded = False
+                    exp_target = self.expanded_widget.size().height()
+                    # Need to temporarily show summary to get correct height if it was hidden
+                    was_visible = self.summary_body_widget.isVisible()
+                    if not was_visible:
+                        self.summary_body_widget.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
+                        self.summary_body_widget.show()
+                        
                     sum_target = self.summary_body_widget.sizeHint().height()
+                    
+                    if not was_visible:
+                        self.summary_body_widget.hide()
+                        self.summary_body_widget.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, False)
                     
                     self.expand_anim.setStartValue(exp_target)
                     self.expand_anim.setEndValue(sum_target)
@@ -1363,6 +1377,7 @@ class ItemCard(QFrame):
                         except: pass
                         self.expanded_widget.setVisible(False)
                         self.summary_body_widget.setVisible(True)
+                        self.expanded_widget.setMaximumHeight(0)
                     self.expand_anim.finished.connect(on_finish)
                     self.expand_anim.start()
                     
@@ -2168,6 +2183,16 @@ class EdgeDropShelf(QWidget):
         lbl_hk = QLabel(tr("Global Hotkey (Click to capture)"))
         lbl_hk.setStyleSheet("color: #cccccc;")
         beh_form.addRow(lbl_hk, self.hotkey_btn)
+        
+        # Move to top on click
+        self.cb_move_top = QCheckBox()
+        self.cb_move_top.setStyleSheet(checkbox_style)
+        self.cb_move_top.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.cb_move_top.setChecked(self.config.get("move_to_top_on_click", True))
+        self.cb_move_top.stateChanged.connect(lambda state: self.config.set("move_to_top_on_click", bool(state)))
+        lbl_move_top = QLabel(tr("Move clicked item to top"))
+        lbl_move_top.setStyleSheet("color: #cccccc;")
+        beh_form.addRow(lbl_move_top, self.cb_move_top)
 
         # ==========================================
         # ==========================================
@@ -2624,6 +2649,17 @@ class EdgeDropShelf(QWidget):
     def _on_card_clicked_to_paste(self, item):
         item_id = item.get("id")
         self.clipboard_watcher.copy_to_clipboard(item)
+        
+        if self.config.get("move_to_top_on_click", True):
+            moved_item = self.clipboard_watcher.move_to_top(item_id)
+            if moved_item:
+                card = self.item_widgets.get(item_id)
+                if card:
+                    card.item = moved_item
+                    card.render_timestamp = moved_item.get("timestamp")
+                    card.update_timestamp()
+                self.load_history()
+                        
         click_to_paste = self.config.get("click_to_paste")
         if click_to_paste is False:
             return
