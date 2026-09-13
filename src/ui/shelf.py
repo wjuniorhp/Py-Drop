@@ -827,9 +827,12 @@ class ItemCard(QFrame):
             from PyQt6.QtGui import QPixmap
             worker = ImageLoaderWorker(content, self.shelf_width - 80, 120)
             def on_image_loaded(img):
-                if not img.isNull():
-                    self.icon_widget.setPixmap(QPixmap.fromImage(img))
-                    self.icon_widget.setStyleSheet("")
+                try:
+                    if not img.isNull():
+                        self.icon_widget.setPixmap(QPixmap.fromImage(img))
+                        self.icon_widget.setStyleSheet("")
+                except RuntimeError:
+                    pass
             worker.signals.finished.connect(on_image_loaded)
             QThreadPool.globalInstance().start(worker)
             img_vlayout.addWidget(self.icon_widget)
