@@ -41,6 +41,12 @@ class CursorTracker(QObject):
         else: # right
             on_edge = cx >= (sx + sw - trigger_width)
             
+        if not self.config.get("enable_edge_activation", True):
+            if self.is_hovering_edge:
+                self.is_hovering_edge = False
+                self.edge_left.emit()
+            return
+            
         # Check vertical bounds (must be within the area height)
         if on_edge:
             if not (y_pos <= cy <= y_pos + area_height):

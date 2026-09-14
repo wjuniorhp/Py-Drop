@@ -2,6 +2,7 @@ import os
 
 _LANGUAGES = {
     "pt_BR": {
+        "Enable Edge Activation": "Ativar pela borda da tela",
         "History Limit": "Limite do Histórico",
         "The shelf is empty.": "A prateleira está vazia.",
         "Just now": "Agora mesmo",

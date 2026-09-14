@@ -2266,7 +2266,6 @@ class EdgeDropShelf(QWidget):
         beh_form.addRow(lbl_move_top, self.cb_move_top)
 
         # ==========================================
-        # ==========================================
         # SECTION: Edge Zone
         # ==========================================
         btn_edge = add_tab(tr("Edge Zone"), 2)
@@ -2323,6 +2322,29 @@ class EdgeDropShelf(QWidget):
         lbl_side.setWordWrap(True)
         lbl_side.setStyleSheet("color: #cccccc;")
         edge_form.addRow(lbl_side, side_layout)
+
+        self.cb_enable_edge = QCheckBox()
+        self.cb_enable_edge.setStyleSheet(checkbox_style)
+        self.cb_enable_edge.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.cb_enable_edge.setChecked(self.config.get("enable_edge_activation", True))
+        lbl_enable = QLabel(tr("Enable Edge Activation"))
+        lbl_enable.setStyleSheet("color: #cccccc;")
+        edge_form.addRow(lbl_enable, self.cb_enable_edge)
+        
+        edge_settings_container = QWidget()
+        edge_subform = create_form()
+        edge_subform.setContentsMargins(0, 0, 0, 0)
+        edge_settings_container.setLayout(edge_subform)
+        edge_form.addRow(edge_settings_container)
+        
+        def on_edge_enable_changed(state):
+            is_enabled = bool(state)
+            self.config.set("enable_edge_activation", is_enabled)
+            edge_settings_container.setVisible(is_enabled)
+            
+        self.cb_enable_edge.stateChanged.connect(on_edge_enable_changed)
+        edge_settings_container.setVisible(self.config.get("enable_edge_activation", True))
+        
         # Sensitivity / Width
         slider_sens = QSlider(Qt.Orientation.Horizontal)
         slider_sens.setMinimumWidth(100)
@@ -2362,7 +2384,7 @@ class EdgeDropShelf(QWidget):
         slider_sens.sliderReleased.connect(on_sens_released)
         lbl_sens = QLabel(tr("Trigger Area (pixels)"))
         lbl_sens.setStyleSheet("color: #cccccc;")
-        edge_form.addRow(lbl_sens, slider_sens)
+        edge_subform.addRow(lbl_sens, slider_sens)
 
         # Sensitivity Height
         slider_height = QSlider(Qt.Orientation.Horizontal)
@@ -2383,7 +2405,7 @@ class EdgeDropShelf(QWidget):
         slider_height.sliderReleased.connect(on_sens_released)
         lbl_sens_height = QLabel(tr("Trigger Height (%)"))
         lbl_sens_height.setStyleSheet("color: #cccccc;")
-        edge_form.addRow(lbl_sens_height, slider_height)
+        edge_subform.addRow(lbl_sens_height, slider_height)
 
         # ==========================================
         # SECTION: System

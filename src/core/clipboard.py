@@ -8,9 +8,10 @@ class ClipboardWatcher(QObject):
     new_item = pyqtSignal(dict)
     history_changed = pyqtSignal()
 
-    def __init__(self, storage, audio=None):
+    def __init__(self, storage, config, audio=None):
         super().__init__()
         self.storage = storage
+        self.config = config
         self.audio = audio
         self.history = self.storage.load()
         

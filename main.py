@@ -21,7 +21,7 @@ def main():
     audio = AudioEngine(config)
     storage = Storage()
     
-    clipboard_watcher = ClipboardWatcher(storage, audio)
+    clipboard_watcher = ClipboardWatcher(storage, config, audio)
     
     shelf = EdgeDropShelf(clipboard_watcher, config, audio)
     
