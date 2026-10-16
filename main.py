@@ -9,6 +9,7 @@ from src.core.storage import Storage
 from src.utils.audio import AudioEngine
 from src.core.hotkey import GlobalHotkey, parse_hotkey_string
 from src.core.i18n import set_language
+from src.utils.helpers import get_cursor_pos, get_screen_geometry
 
 def main():
     app = QApplication(sys.argv)
@@ -33,13 +34,11 @@ def main():
         if shelf.is_open:
             shelf.close_shelf()
         else:
-            from src.utils.helpers import get_cursor_pos, get_screen_geometry
             cx, cy = get_cursor_pos()
             s_name, sx, sy, sw, sh = get_screen_geometry(cx, cy)
             edge_sides = config.get("edge_sides", {})
             edge_side = edge_sides.get(s_name, config.get("edge_side", "left"))
             shelf.handle_edge_enter((s_name, sx, sy, sw, sh, edge_side))
-            shelf.open_shelf()
             
     hotkey = GlobalHotkey()
     hotkey.activated.connect(toggle_shelf_event)

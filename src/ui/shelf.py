@@ -1550,7 +1550,7 @@ class EdgeDropShelf(QWidget):
         self.is_open = False
         self.is_settings_view = False
         self.animation = QPropertyAnimation(self, b"pos")
-        self.animation.setDuration(300)
+        self.animation.setDuration(150)
         self.animation.setEasingCurve(QEasingCurve.Type.OutCubic)
         self.animation.finished.connect(self._on_animation_finished)
         self.setAcceptDrops(True)
@@ -2545,14 +2545,14 @@ class EdgeDropShelf(QWidget):
             if self.is_open:
                 pass
             else:
-                self.current_screen_name = s_name
-                self.edge_side = edge_side
-                self.screen_x, self.screen_y, self.screen_width, self.screen_height = sx, sy, sw, sh
-                self.shelf_height = int(self.screen_height * 0.8)
-                self.y_pos = self.screen_y + int((self.screen_height - self.shelf_height) / 2)
-                self._calc_positions()
-                self.setFixedSize(self.shelf_width, self.shelf_height)
-                self.load_history(force_rebuild=True)
+                if getattr(self, "current_screen_name", None) != s_name or getattr(self, "edge_side", None) != edge_side:
+                    self.current_screen_name = s_name
+                    self.edge_side = edge_side
+                    self.screen_x, self.screen_y, self.screen_width, self.screen_height = sx, sy, sw, sh
+                    self.shelf_height = int(self.screen_height * 0.8)
+                    self.y_pos = self.screen_y + int((self.screen_height - self.shelf_height) / 2)
+                    self._calc_positions()
+                    self.setFixedSize(self.shelf_width, self.shelf_height)
             
         self.open_shelf()
 
