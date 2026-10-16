@@ -12,7 +12,7 @@ class CursorTracker(QObject):
         self.is_hovering_edge = False
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._track)
-        self.timer.setInterval(50)
+        self.timer.setInterval(12)
 
     def start(self):
         self.timer.start()
@@ -21,6 +21,12 @@ class CursorTracker(QObject):
         self.timer.stop()
 
     def _track(self):
+        if not self.config.get("enable_edge_activation", True):
+            if self.is_hovering_edge:
+                self.is_hovering_edge = False
+                self.edge_left.emit()
+            return
+
         cx, cy = utils.get_cursor_pos()
         trigger_width = self.config.get("trigger_width")
         trigger_height_percent = self.config.get("trigger_height_percent")
@@ -40,12 +46,6 @@ class CursorTracker(QObject):
             on_edge = cx <= sx + trigger_width
         else: # right
             on_edge = cx >= (sx + sw - trigger_width)
-            
-        if not self.config.get("enable_edge_activation", True):
-            if self.is_hovering_edge:
-                self.is_hovering_edge = False
-                self.edge_left.emit()
-            return
             
         # Check vertical bounds (must be within the area height)
         if on_edge:

@@ -10,8 +10,27 @@ from src.utils import helpers as utils
 import os
 import re
 
+_SVG_PIXMAP_CACHE = {}
+
 def create_svg(inner_html, color, size=18):
     return f"""<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{inner_html}</svg>"""
+
+def _get_svg_pixmap(inner_html, color, size_svg, w, h, dpr):
+    key = (inner_html, color, size_svg, w, h, dpr)
+    pix = _SVG_PIXMAP_CACHE.get(key)
+    if pix is None:
+        from PyQt6.QtGui import QPixmap
+        pix = QPixmap(max(1, int(w * dpr)), max(1, int(h * dpr)))
+        pix.setDevicePixelRatio(dpr)
+        pix.fill(Qt.GlobalColor.transparent)
+        p = QPainter(pix)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        svg = create_svg(inner_html, color, size_svg)
+        renderer = QSvgRenderer(QByteArray(svg.encode('utf-8')))
+        renderer.render(p, QRectF(0, 0, w, h))
+        p.end()
+        _SVG_PIXMAP_CACHE[key] = pix
+    return pix
 
 class SvgButton(QPushButton):
     def __init__(self, inner_html, size=18, color="#666666", hover_color="#ffffff", size_fixed=24):
@@ -44,14 +63,12 @@ class SvgButton(QPushButton):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         if self._is_active:
             current_color = self.active_color
         else:
             current_color = self.hover_color if self.is_hovered else self.color
-        svg = create_svg(self.inner_html, current_color, self.size_svg)
-        renderer = QSvgRenderer(QByteArray(svg.encode('utf-8')))
-        renderer.render(painter)
+        pix = _get_svg_pixmap(self.inner_html, current_color, self.size_svg, self.width(), self.height(), self.devicePixelRatioF())
+        painter.drawPixmap(0, 0, pix)
 
 class SvgLabel(QWidget):
     def __init__(self, inner_html, size=18, color="#aaaaaa"):
@@ -63,10 +80,8 @@ class SvgLabel(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        svg = create_svg(self.inner_html, self.color, self.size_svg)
-        renderer = QSvgRenderer(QByteArray(svg.encode('utf-8')))
-        renderer.render(painter)
+        pix = _get_svg_pixmap(self.inner_html, self.color, self.size_svg, self.width(), self.height(), self.devicePixelRatioF())
+        painter.drawPixmap(0, 0, pix)
 
 class StackedIconsWidget(QWidget):
     def __init__(self, pixmaps, size=32, show_plus=False):
@@ -1480,34 +1495,47 @@ class ShelfContainer(QWidget):
     def __init__(self, parent_shelf):
         super().__init__(parent_shelf)
         self.shelf = parent_shelf
+        self._cached_path_key = None
+        self._cached_path = None
+        self._cached_header_path = None
         
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        path = QPainterPath()
         r = 15
         w = self.width()
         h = self.height()
-        if getattr(self.shelf, "edge_side", "left") == "left":
-            path.moveTo(w - r, r)
-            path.arcTo(w - r*2, r, r*2, r*2, 90, -90)
-            path.lineTo(w, h - r*2)
-            path.arcTo(w - r*2, h - r*3, r*2, r*2, 0, -90)
-            path.lineTo(r, h - r)
-            path.quadTo(0, h - r, 0, h)
-            path.lineTo(0, 0)
-            path.quadTo(0, r, r, r)
-            path.lineTo(w - r, r)
-        else:
-            path.moveTo(r, r)
-            path.arcTo(0, r, r*2, r*2, 90, 90)
-            path.lineTo(0, h - r*2)
-            path.arcTo(0, h - r*3, r*2, r*2, 180, 90)
-            path.lineTo(w - r, h - r)
-            path.quadTo(w, h - r, w, h)
-            path.lineTo(w, 0)
-            path.quadTo(w, r, w - r, r)
-            path.lineTo(r, r)
+        edge_side = getattr(self.shelf, "edge_side", "left")
+        path_key = (w, h, edge_side)
+        
+        if self._cached_path_key != path_key:
+            path = QPainterPath()
+            if edge_side == "left":
+                path.moveTo(w - r, r)
+                path.arcTo(w - r*2, r, r*2, r*2, 90, -90)
+                path.lineTo(w, h - r*2)
+                path.arcTo(w - r*2, h - r*3, r*2, r*2, 0, -90)
+                path.lineTo(r, h - r)
+                path.quadTo(0, h - r, 0, h)
+                path.lineTo(0, 0)
+                path.quadTo(0, r, r, r)
+                path.lineTo(w - r, r)
+            else:
+                path.moveTo(r, r)
+                path.arcTo(0, r, r*2, r*2, 90, 90)
+                path.lineTo(0, h - r*2)
+                path.arcTo(0, h - r*3, r*2, r*2, 180, 90)
+                path.lineTo(w - r, h - r)
+                path.quadTo(w, h - r, w, h)
+                path.lineTo(w, 0)
+                path.quadTo(w, r, w - r, r)
+                path.lineTo(r, r)
+                
+            header_path = QPainterPath()
+            header_path.addRect(QRectF(0, 0, w, r + 45))
+            self._cached_path = path
+            self._cached_header_path = path.intersected(header_path)
+            self._cached_path_key = path_key
             
         is_translucent = self.shelf.config.get("translucent_background")
         if is_translucent:
@@ -1516,18 +1544,14 @@ class ShelfContainer(QWidget):
         else:
             bg_alpha = 255
             
-        painter.fillPath(path, QColor(0, 0, 0, bg_alpha))
-        
-        header_path = QPainterPath()
-        header_path.addRect(QRectF(0, 0, w, r + 45))
-        intersected = path.intersected(header_path)
-        painter.fillPath(intersected, QColor(17, 17, 17, bg_alpha))
+        painter.fillPath(self._cached_path, QColor(0, 0, 0, bg_alpha))
+        painter.fillPath(self._cached_header_path, QColor(17, 17, 17, bg_alpha))
         
         pen = painter.pen()
         pen.setColor(QColor(34, 34, 34, 255)) # #222
         pen.setWidth(1)
         painter.setPen(pen)
-        painter.drawPath(path)
+        painter.drawPath(self._cached_path)
 
 class EdgeDropShelf(QWidget):
     def __init__(self, clipboard_watcher, config, audio=None):
@@ -1541,10 +1565,14 @@ class EdgeDropShelf(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_AlwaysShowToolTips, True)
         self.shelf_width = self.config.get("shelf_width")
-        self.screen_x, self.screen_y, self.screen_width, self.screen_height = 0, 0, *utils.get_screen_size()
+        cx, cy = utils.get_cursor_pos()
+        s_name, sx, sy, sw, sh = utils.get_screen_geometry(cx, cy)
+        self.current_screen_name = s_name
+        self.screen_x, self.screen_y, self.screen_width, self.screen_height = sx, sy, sw, sh
         self.shelf_height = int(self.screen_height * 0.8)
         self.y_pos = self.screen_y + int((self.screen_height - self.shelf_height) / 2)
-        self.edge_side = self.config.get("edge_side")
+        edge_sides = self.config.get("edge_sides", {})
+        self.edge_side = edge_sides.get(s_name, self.config.get("edge_side", "left"))
         self.display_limit = 30
         self._calc_positions()
         self.is_open = False
@@ -1557,11 +1585,21 @@ class EdgeDropShelf(QWidget):
         self.item_widgets = {}
         self._setup_ui()
         # Keep the window at the correct physical geometry on the correct screen,
-        # but just use hide(). We will animate the container inside it.
+        # and pre-realize native window/backing-store invisibly to eliminate cold-start delay.
+        self.setFixedSize(self.shelf_width, self.shelf_height)
         self.setGeometry(self.x_visible, self.y_pos, self.shelf_width, self.shelf_height)
-        self.hide()
         self._update_app_stylesheet()
         self.load_history()
+        
+        self.container.move(0, 0)
+        self.setWindowOpacity(0.0)
+        self.show()
+        QApplication.processEvents()
+        self.hide()
+        self.setWindowOpacity(1.0)
+        start_x = self.shelf_width if self.edge_side == "right" else -self.shelf_width
+        self.container.move(start_x, 0)
+        
         self.clipboard_watcher.new_item.connect(lambda item: self.load_history())
         if hasattr(self.clipboard_watcher, 'history_changed'):
             self.clipboard_watcher.history_changed.connect(self.load_history)
@@ -2539,20 +2577,17 @@ class EdgeDropShelf(QWidget):
             self.empty_lbl.hide()
 
     def handle_edge_enter(self, screen_info=None):
-        if screen_info:
+        if screen_info and not self.is_open:
             s_name, sx, sy, sw, sh, edge_side = screen_info
-            # If already open on the exact same screen, ignore the teleport
-            if self.is_open:
-                pass
-            else:
-                if getattr(self, "current_screen_name", None) != s_name or getattr(self, "edge_side", None) != edge_side:
-                    self.current_screen_name = s_name
-                    self.edge_side = edge_side
-                    self.screen_x, self.screen_y, self.screen_width, self.screen_height = sx, sy, sw, sh
-                    self.shelf_height = int(self.screen_height * 0.8)
-                    self.y_pos = self.screen_y + int((self.screen_height - self.shelf_height) / 2)
-                    self._calc_positions()
-                    self.setFixedSize(self.shelf_width, self.shelf_height)
+            if getattr(self, "current_screen_name", None) != s_name or getattr(self, "edge_side", None) != edge_side:
+                self.current_screen_name = s_name
+                self.edge_side = edge_side
+                self.screen_x, self.screen_y, self.screen_width, self.screen_height = sx, sy, sw, sh
+                self.shelf_height = int(self.screen_height * 0.8)
+                self.y_pos = self.screen_y + int((self.screen_height - self.shelf_height) / 2)
+                self._calc_positions()
+                self.setFixedSize(self.shelf_width, self.shelf_height)
+                self.container.resize(self.shelf_width, self.shelf_height)
             
         self.open_shelf()
 
@@ -2599,13 +2634,43 @@ class EdgeDropShelf(QWidget):
             # Mouse is in the buffer but outside the physical window, Qt won't fire leaveEvent again.
             # So we poll until they leave the buffer or re-enter the window.
             QTimer.singleShot(100, self._check_close)
+
     def open_shelf(self):
         if not self.is_open:
-            self.setGeometry(self.x_visible, self.y_pos, self.shelf_width, self.shelf_height)
+            self.is_open = True
+            self.animation.stop()
+            
+            if (self.x(), self.y(), self.width(), self.height()) != (self.x_visible, self.y_pos, self.shelf_width, self.shelf_height):
+                self.setGeometry(self.x_visible, self.y_pos, self.shelf_width, self.shelf_height)
+                
+            start_x = self.shelf_width if self.edge_side == "right" else -self.shelf_width
+            cur_x = self.container.pos().x()
+            if (self.edge_side == "left" and cur_x <= start_x) or (self.edge_side == "right" and cur_x >= start_x):
+                anim_start_x = start_x
+                advance_first_frame = True
+            else:
+                anim_start_x = cur_x
+                advance_first_frame = False
+                
+            self.animation.setTargetObject(self.container)
+            self.animation.setPropertyName(b"pos")
+            self.animation.setStartValue(QPoint(anim_start_x, 0))
+            self.animation.setEndValue(QPoint(0, 0))
+            self.animation.start()
+            if advance_first_frame:
+                self.animation.setCurrentTime(16)
+                
             self.show()
             self.raise_()
-            self.activateWindow()
-            self.setFocus()
+            self.container.repaint()
+            
+            if self.audio: self.audio.play_toggle()
+            
+            def focus_and_activate():
+                if self.is_open:
+                    self.activateWindow()
+                    self.setFocus()
+            QTimer.singleShot(0, focus_and_activate)
             
             def run_checks():
                 for card in self.item_widgets.values():
@@ -2614,23 +2679,11 @@ class EdgeDropShelf(QWidget):
             
             # Defer the checks until after the slide animation finishes (400ms)
             QTimer.singleShot(400, run_checks)
-            
-            self.is_open = True
-            if self.audio: self.audio.play_toggle()
-            
-            # Animate the container sliding in from the edge
-            start_x = self.shelf_width if self.edge_side == "right" else -self.shelf_width
-            self.container.move(start_x, 0)
-            
-            self.animation.setTargetObject(self.container)
-            self.animation.setPropertyName(b"pos")
-            self.animation.setStartValue(QPoint(start_x, 0))
-            self.animation.setEndValue(QPoint(0, 0))
-            self.animation.start()
 
     def close_shelf(self):
         if self.is_open:
             self.is_open = False
+            self.animation.stop()
             try:
                 ImagePreviewWindow.close_all()
             except NameError:
@@ -2650,6 +2703,8 @@ class EdgeDropShelf(QWidget):
 
     def load_history(self, force_rebuild=False):
         history = self.clipboard_watcher.get_history()
+        visible_slice = history[:self.display_limit]
+        visible_ids = {item.get("id") for item in visible_slice}
         
         # 1. Identify which items to keep and which to delete
         current_history_map = {item.get("id"): item for item in history}
@@ -2671,26 +2726,29 @@ class EdgeDropShelf(QWidget):
                 w.setParent(None)
                 w.deleteLater()
                 
-        # 2. Clear layouts (remove without deleting remaining widgets)
+        # 2. Clear layouts without unparenting reusable ItemCards (avoids expensive reparent/repolish)
         while self.pinned_section.body_layout.count():
             item = self.pinned_section.body_layout.takeAt(0)
-            if item.widget():
-                item.widget().setParent(None)
+            w = item.widget()
+            if w and getattr(w, "item_id", None) not in visible_ids:
+                w.hide()
                 
         while self.unpinned_layout.count():
             item = self.unpinned_layout.takeAt(0)
-            if item.widget():
-                w = item.widget()
-                w.setParent(None)
+            w = item.widget()
+            if w:
                 if isinstance(w, TimeDividerWidget):
+                    w.setParent(None)
                     w.deleteLater()
+                elif getattr(w, "item_id", None) not in visible_ids:
+                    w.hide()
                     
         # 3. Rebuild UI
         has_pinned = False
         from src.utils.helpers import get_time_group
         current_group_id = None
         
-        for item in history[:self.display_limit]:
+        for item in visible_slice:
             item_id = item.get("id")
             is_pinned = item.get("pinned")
             
@@ -2722,6 +2780,9 @@ class EdgeDropShelf(QWidget):
             self.empty_lbl.show()
         else:
             self.empty_lbl.hide()
+            
+        self.unpinned_layout.activate()
+        self.items_layout.activate()
 
     def delete_subitem(self, group_id, file_path):
         if self.audio: self.audio.play_delete()

@@ -1,6 +1,8 @@
 from src.core.i18n import tr
 import ctypes
 from ctypes import wintypes
+from PyQt6.QtGui import QCursor, QGuiApplication
+from PyQt6.QtCore import QPoint
 
 # Windows API types
 user32 = ctypes.windll.user32
@@ -18,13 +20,11 @@ class RECT(ctypes.Structure):
 
 def get_cursor_pos():
     """Returns the current (x, y) coordinates of the global cursor."""
-    from PyQt6.QtGui import QCursor
     pos = QCursor.pos()
     return (pos.x(), pos.y())
 
 def get_screen_size():
     """Returns the width and height of the primary monitor."""
-    from PyQt6.QtGui import QGuiApplication
     app = QGuiApplication.instance()
     if app and app.primaryScreen():
         geom = app.primaryScreen().geometry()
@@ -36,8 +36,6 @@ def get_screen_size():
 
 def get_screen_geometry(cx, cy):
     """Returns the geometry (name, x, y, w, h) of the monitor containing the point (cx, cy)."""
-    from PyQt6.QtGui import QGuiApplication
-    from PyQt6.QtCore import QPoint
     screen = QGuiApplication.screenAt(QPoint(cx, cy))
     if not screen:
         # Find closest screen instead of defaulting to primary
