@@ -48,6 +48,7 @@ def main():
         hotkey.start_hotkey(modifiers, vk)
         
     shelf.set_hotkey_manager(hotkey)
+    shelf.set_cursor_tracker(tracker)
 
     tracker.start()
     

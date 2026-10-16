@@ -2379,6 +2379,11 @@ class EdgeDropShelf(QWidget):
             is_enabled = bool(state)
             self.config.set("enable_edge_activation", is_enabled)
             edge_settings_container.setVisible(is_enabled)
+            if getattr(self, "cursor_tracker", None):
+                if is_enabled:
+                    self.cursor_tracker.start()
+                else:
+                    self.cursor_tracker.stop()
             
         self.cb_enable_edge.stateChanged.connect(on_edge_enable_changed)
         edge_settings_container.setVisible(self.config.get("enable_edge_activation", True))
@@ -2526,6 +2531,9 @@ class EdgeDropShelf(QWidget):
 
     def set_hotkey_manager(self, manager):
         self.hotkey_manager = manager
+
+    def set_cursor_tracker(self, tracker):
+        self.cursor_tracker = tracker
 
     def _toggle_settings(self):
         if self.audio: self.audio.play_toggle()
